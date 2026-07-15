@@ -319,3 +319,74 @@ class AgriDroneEnv(gym.Env):
         if self._pybullet_renderer is not None:
             self._pybullet_renderer.close()
             self._pybullet_renderer = None
+
+if __name__ == "__main__":
+    import os
+    import sys  # ◄--- AJOUTER CETTE LIGNE
+    import time
+    
+   
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    print("=== Lancement de l'environnement Agri-Drone avec PyBullet ===")
+    
+    # 1. Génération de l'URDF de secours au bon emplacement
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    urdf_test_path = os.path.join(current_dir, "drone_test.urdf")
+    
+    if not os.path.exists(urdf_test_path):
+        with open(urdf_test_path, "w") as f:
+            f.write('''<robot name="test_drone">
+                <link name="base_link"><visual><geometry><box size="0.6 0.6 0.15"/></geometry><material name="blue"><color rgba="0 0 0.8 1"/></material></visual></link>
+                <link name="prop1"><visual><geometry><cylinder radius="0.25" length="0.02"/></geometry><material name="black"><color rgba="0 0 0 1"/></material></visual></link>
+                <joint name="j_p1" type="continuous"><parent link="base_link"/><child link="prop1"/><origin xyz="0.3 0.3 0.05"/></joint>
+            </robot>''')
+
+    # 2. Configuration complète requise par AgriDroneEnv
+    config_test = {
+        "world": {"size_x": 40.0, "size_y": 40.0, "ground_z": 0.0, "size_z": 30.0},
+        "drone": {
+            "dry_mass": 2.0, "payload_mass_full": 3.0, "gravity": 9.81,
+            "max_thrust_total": 100.0, "drag_coefficient": 0.1,
+            "max_tilt_angle_rad": 0.6, "max_angular_rate": 3.0,
+            "attitude_time_constant": 0.1, 
+            "urdf_path": os.path.join(current_dir, "agri_hexacopter_pro.urdf")
+        },
+        "simulation": {"dt": 0.02, "max_episode_steps": 300},
+        "normalization": {"max_velocity": 15.0, "max_distance": 60.0},
+        "battery": {"capacity_wh": 80.0, "consumption_coefficient": 0.04},
+        "goal": {"success_radius": 1.5},
+        "wind": {"max_speed": 4.0, "gust_probability": 0.05, "enabled": True},
+        "obstacles": {"min_radius": 1.0, "max_radius": 3.0, "count_stage_default": 4}
+    }
+    
+    # 3. Initialisation de l'environnement en mode "human" pour activer PyBullet
+    env = AgriDroneEnv(config=config_test, render_mode="human")
+    
+    # Démarrage d'un épisode
+    obs, info = env.reset()
+    print("🟢 Environnement connecté à PyBullet avec succès !")
+    print(f"Position cible générée : {info['goal_position']}")
+    
+    # 4. Boucle d'exécution (Simulation visuelle de 200 étapes)
+    for etape in range(200):
+        # On génère une action continue aléatoire [-1, 1] (Throttle, Roll, Pitch, Yaw)
+        action = env.action_space.sample()
+        
+        # Le drone applique l'action via drone_dynamics
+        obs, reward, terminated, truncated, info = env.step(action)
+        
+        # IMPORTANT : On appelle render() pour mettre à jour la position 3D dans PyBullet
+        env.render()
+        
+        # Ralentissement pour que la simulation soit fluide et visible à l'œil humain (~50 FPS)
+        time.sleep(0.02)
+        
+        if etape % 20 == 0:
+            print(f"Étape {etape:03d} | Distance Cible: {info['distance_to_goal']:.2f}m | Batterie: {info['battery_level']:.2f} Wh")
+            
+        if terminated or truncated:
+            print("🏁 Fin de la simulation (Objectif atteint, crash ou batterie vide) !")
+            break
+            
+    env.close()
+    print("🟢 Fenêtre PyBullet fermée proprement.")

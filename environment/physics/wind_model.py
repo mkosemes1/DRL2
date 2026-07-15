@@ -6,6 +6,7 @@ Utilisé pour le Domain Randomization et le Curriculum Learning
 (le vent n'est activé qu'à partir du stage_3).
 """
 
+from __future__ import annotations
 import numpy as np
 
 

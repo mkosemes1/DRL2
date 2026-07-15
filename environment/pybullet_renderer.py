@@ -94,3 +94,54 @@ class PyBulletRenderer:
     def close(self) -> None:
         if p.isConnected(self.client):
             p.disconnect(self.client)
+
+
+if __name__ == "__main__":
+    import time
+    print("=== Test autonome du Renderer PyBullet ===")
+    
+    # Configuration d'un chemin temporaire pour tester (ou utilisez votre vrai URDF)
+    # Note: Si vous n'avez pas de fichier URDF sous la main, créez un fichier "test.urdf" minimal
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    urdf_test = os.path.join(current_dir, "drone_test.urdf")
+    if not os.path.exists(urdf_test):
+        # Création d'un URDF de secours ultra-simple (une boîte avec 4 hélices)
+        with open(urdf_test, "w") as f:
+            f.write('''<robot name="test_drone">
+                <link name="base_link"><visual><geometry><box size="0.5 0.5 0.1"/></geometry></visual></link>
+                <link name="prop1"><visual><geometry><cylinder radius="0.2" length="0.01"/></geometry></visual></link>
+                <joint name="j_p1" type="continuous"><parent link="base_link"/><child link="prop1"/><origin xyz="0.3 0.3 0.05"/></joint>
+            </robot>''')
+
+    # Initialisation du renderer
+    renderer = PyBulletRenderer(urdf_path=urdf_test)
+    
+    # Données fictives pour l'objectif et les obstacles
+    faux_objectif = np.array([5.0, 5.0, 4.0])
+    faux_obstacles = [
+        {"pos": np.array([2.0, 2.0, 1.0]), "radius": 1.0},
+        {"pos": np.array([-3.0, 4.0, 2.0]), "radius": 1.5}
+    ]
+    
+    renderer.reset_scene(faux_objectif, faux_obstacles)
+    
+    # Classe factice pour simuler l'objet 'state' attendu par update()
+    class FakeState:
+        x, y, z = 0.0, 0.0, 1.0
+        roll, pitch, yaw = 0.0, 0.0, 0.0
+    
+    state = FakeState()
+    print("🟢 Fenêtre PyBullet ouverte. Fermeture automatique dans 10 secondes...")
+    
+    # Boucle d'animation (simulation de mouvement)
+    for t in range(500):
+        state.z += 0.01          # Le drone monte
+        state.yaw += 0.02         # Le drone tourne sur lui-même
+        state.pitch = 0.2 * np.sin(t * 0.05) # Oscillation
+        
+        renderer.update(state, throttle_normalized=0.6)
+        time.sleep(0.02) # Calage à ~50 FPS
+        
+    renderer.close()
+    print("🟢 Test terminé.")

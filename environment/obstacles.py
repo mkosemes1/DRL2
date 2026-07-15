@@ -4,6 +4,7 @@ environment/obstacles.py
 Gestion des obstacles sphériques de la parcelle agricole.
 """
 
+from __future__ import annotations
 import numpy as np
 
 
