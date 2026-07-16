@@ -1,40 +1,32 @@
 """
 environment/agri_drone_env.py
-================================
-Environnement Gymnasium principal du drone agricole.
-
-Respecte l'API Gymnasium standard :
-  - reset(seed, options) -> (obs, info)
-  - step(action) -> (obs, reward, terminated, truncated, info)
-  - render()
-  - close()
-
-Architecture pensée pour l'extensibilité future (caméra RGB,
-multispectrale, pulvérisation...) : toutes ces fonctionnalités
-pourront être ajoutées en étendant observation_space et en
-branchant de nouveaux capteurs dans _get_observation(), sans
-toucher au coeur de la dynamique/reward.
-
-Rendu 3D :
-  Le rendu PyBullet (environment/pybullet_renderer.py) est
-  totalement découplé de la dynamique d'entraînement. Il n'est
-  initialisé que si render_mode="human", et ne fait qu'afficher
-  l'état calculé par physics/drone_dynamics.py — il ne recalcule
-  aucune physique. Cela permet un entraînement rapide (dynamique
-  custom légère) tout en offrant une visualisation 3D fidèle du
-  vrai modèle URDF lors de l'évaluation.
+=============================
+Environnement Gymnasium pour drone agricole.
+Version avec vol fonctionnel et affichage de la grille de champs.
 """
 
-from __future__ import annotations
+import os
+import sys
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+import pybullet as p
+import pybullet_data
 
 from physics.drone_dynamics import DroneDynamics, DroneParams
 from physics.wind_model import WindModel
 from obstacles import ObstacleManager
-from reward.reward_function import RewardCalculator, RewardConfig
 from utils.normalization import normalize
+
+
+class FieldCell:
+    """Représente une cellule du champ."""
+    def __init__(self):
+        self.healthy = True
+        self.wet = True
+        self.sprayed = False
+        self.watered = False
+        self.visited = False
 
 
 class AgriDroneEnv(gym.Env):
@@ -45,348 +37,278 @@ class AgriDroneEnv(gym.Env):
         self.config = config
         self.render_mode = render_mode
 
+        # Paramètres du monde
         world_cfg = config["world"]
         self.world_bounds = {
-            "x": (-world_cfg["size_x"] / 2, world_cfg["size_x"] / 2),
-            "y": (-world_cfg["size_y"] / 2, world_cfg["size_y"] / 2),
+            "x": (-world_cfg["size_x"]/2, world_cfg["size_x"]/2),
+            "y": (-world_cfg["size_y"]/2, world_cfg["size_y"]/2),
             "z": (world_cfg["ground_z"], world_cfg["size_z"]),
         }
+        self.field_size = (world_cfg.get("field_cells_x", 20), world_cfg.get("field_cells_y", 20))
 
+        # Grille du champ (initialisée plus tard)
+        self.field_grid = None
+        self.total_cells = self.field_size[0] * self.field_size[1]
+
+        # Paramètres du drone
         drone_cfg = config["drone"]
-        self.drone_params = DroneParams(
-            dry_mass=drone_cfg["dry_mass"],
-            payload_mass=drone_cfg["payload_mass_full"],
-            gravity=drone_cfg["gravity"],
-            max_thrust_total=drone_cfg["max_thrust_total"],
-            drag_coefficient=drone_cfg["drag_coefficient"],
-            max_tilt_angle_rad=drone_cfg["max_tilt_angle_rad"],
-            max_angular_rate=drone_cfg["max_angular_rate"],
-            attitude_time_constant=drone_cfg["attitude_time_constant"],
-            max_velocity=config["normalization"]["max_velocity"],
+        params = DroneParams(
+            dry_mass=drone_cfg.get("dry_mass", 10.0),
+            payload_mass=drone_cfg.get("payload_mass_full", 5.0),
+            gravity=drone_cfg.get("gravity", 9.81),
+            max_thrust_total=drone_cfg.get("max_thrust_total", 350.0),
+            drag_coefficient=drone_cfg.get("drag_coefficient", 0.08),
+            max_tilt_angle_rad=drone_cfg.get("max_tilt_angle_rad", 0.5236),
+            max_angular_rate=drone_cfg.get("max_angular_rate", 3.0),
+            attitude_time_constant=drone_cfg.get("attitude_time_constant", 0.08),
+            max_velocity=config["normalization"].get("max_velocity", 50.0),
         )
+        self.dt = config["simulation"].get("dt", 0.02)
+        self.max_steps = config["simulation"].get("max_episode_steps", 1000)
+        self.dynamics = DroneDynamics(params, self.world_bounds, self.dt)
 
-        self.dt = config["simulation"]["dt"]
-        self.max_steps = config["simulation"]["max_episode_steps"]
-        self.max_velocity = config["normalization"]["max_velocity"]
-        self.max_distance = config["normalization"]["max_distance"]
-        self.battery_capacity = config["battery"]["capacity_wh"]
-        self.battery_alpha = config["battery"]["consumption_coefficient"]
-        self.success_radius = config["goal"]["success_radius"]
+        # Désactiver les fonctionnalités agricoles (sauf affichage)
+        self.wind = WindModel(enabled=False)
+        self.obstacle_manager = ObstacleManager(self.world_bounds, min_radius=1.0, max_radius=3.0)
+        self.obstacle_manager.obstacles = []
 
-        self.dynamics = DroneDynamics(self.drone_params, self.world_bounds, self.dt)
-        self.wind = WindModel(
-            max_speed=config["wind"]["max_speed"],
-            gust_probability=config["wind"]["gust_probability"],
-            enabled=config["wind"]["enabled"],
-        )
-        self.obstacle_manager = ObstacleManager(
-            self.world_bounds,
-            min_radius=config["obstacles"]["min_radius"],
-            max_radius=config["obstacles"]["max_radius"],
-        )
-        self.reward_calculator = RewardCalculator(RewardConfig())
-
-        # --- Espaces Gymnasium ---
-        # Observation (17 dimensions, toutes normalisées dans [-1, 1]) :
-        # [x,y,z, vx,vy,vz, roll,pitch,yaw, roll_r,pitch_r,yaw_r,
-        #  distance_goal, direction_goal, battery, nearest_obstacle, wind_speed]
+        # Espaces Gymnasium
         self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(17,), dtype=np.float32)
-
-        # Action : [throttle, roll_cmd, pitch_cmd, yaw_cmd] dans [-1, 1]
-        # PPO préfère un espace d'action continu car :
-        #   - la politique est une gaussienne paramétrée (mean, std),
-        #     naturellement adaptée à des sorties continues ;
-        #   - un multirotor a un contrôle intrinsèquement continu
-        #     (pas d'ensemble discret d'actions physiquement pertinent) ;
-        #   - discrétiser l'espace ferait exploser le nombre d'actions
-        #     possibles (4 dimensions continues -> combinatoire énorme)
-        #     et perdrait la notion de proximité entre actions voisines.
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,), dtype=np.float32)
 
         # État interne
-        self.current_step = 0
-        self.goal_position = np.zeros(3)
-        self.battery_level = self.battery_capacity
-        self.curriculum_stage: dict = {
-            "obstacle_count": config["obstacles"]["count_stage_default"],
-            "wind_enabled": config["wind"]["enabled"],
-            "randomize_mass": False,
-        }
+        self.goal_position = np.array([20.0, 20.0, 2.0])
+        self.base_position = np.array([0.0, 0.0, 0.05])
+        self.battery_level = 1e6
+        self.pesticide_level = 5.0
+        self.water_level = 5.0
+        self.maladies_traitees = 0
+        self.sec_arrosees = 0
+        self.returning_home = False
+        self.step_count = 0
 
-        # Dernière action de throttle normalisée [0,1], utilisée uniquement
-        # pour animer visuellement la vitesse de rotation des hélices
-        # dans le rendu PyBullet (aucun impact sur la physique/apprentissage).
-        self._last_throttle_normalized = 0.0
+        # Rendu PyBullet (lazy)
+        self._client = None
+        self._drone_id = None
+        self._prop_joints = []
+        self._prop_angle = 0.0
+        self._urdf_path = drone_cfg.get("urdf_path", os.path.join(os.path.dirname(__file__), "agri_hexacopter_pro.urdf"))
+        self._field_created = False
+        self._cell_ids = []  # pour stocker les IDs des cubes
 
-        # Renderer PyBullet créé de façon paresseuse (lazy), uniquement
-        # si render_mode == "human" et lors du premier appel à render().
-        self._pybullet_renderer = None
-
-        self._np_random = np.random.default_rng()
-
-    # ------------------------------------------------------------------
-    def set_curriculum_stage(self, stage: dict) -> None:
-        """Appelé par le CurriculumManager pour changer la difficulté."""
-        self.curriculum_stage = stage
-        self.wind.enabled = stage.get("wind_enabled", False)
-
-    # ------------------------------------------------------------------
-    def reset(self, seed: int | None = None, options: dict | None = None):
+    def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        if seed is not None:
-            self._np_random = np.random.default_rng(seed)
+        self.step_count = 0
+        self.battery_level = 1e6
+        self.pesticide_level = 5.0
+        self.water_level = 5.0
+        self.maladies_traitees = 0
+        self.sec_arrosees = 0
+        self.returning_home = False
+        self.dynamics.reset(np.array([0.0, 0.0, 1.0]))
+        self.goal_position = np.array([20.0, 20.0, 2.0])
 
-        self.current_step = 0
-        self.battery_level = self.battery_capacity
-        self._last_throttle_normalized = 0.0
+        # Initialiser la grille du champ avec des cellules aléatoires (pour l'affichage)
+        if self.field_grid is None:
+            self.field_grid = [[FieldCell() for _ in range(self.field_size[1])] for _ in range(self.field_size[0])]
+            # Quelques cellules malades et sèches pour l'exemple
+            rng = np.random.default_rng()
+            for i in range(self.field_size[0]):
+                for j in range(self.field_size[1]):
+                    if rng.random() < 0.15:
+                        self.field_grid[i][j].healthy = False
+                    if rng.random() < 0.15:
+                        self.field_grid[i][j].wet = False
 
-        # Domain randomization de la masse (cuve pleine/vide aléatoire)
-        if self.curriculum_stage.get("randomize_mass", False):
-            fill_ratio = self._np_random.uniform(0.0, 1.0)
-            self.dynamics.params.payload_mass = fill_ratio * self.config["drone"]["payload_mass_full"]
-        else:
-            self.dynamics.params.payload_mass = self.config["drone"]["payload_mass_full"]
+        # Réinitialiser les flags de visite/traitement
+        for row in self.field_grid:
+            for cell in row:
+                cell.visited = False
+                cell.sprayed = False
+                cell.watered = False
 
-        # Position de départ aléatoire (domain randomization)
-        start_pos = np.array([
-            self._np_random.uniform(-5, 5),
-            self._np_random.uniform(-5, 5),
-            1.0,
-        ])
-        self.dynamics.reset(start_pos)
-
-        # Objectif GPS aléatoire, suffisamment loin du départ
-        xb, yb = self.world_bounds["x"], self.world_bounds["y"]
-        while True:
-            self.goal_position = np.array([
-                self._np_random.uniform(xb[0] * 0.8, xb[1] * 0.8),
-                self._np_random.uniform(yb[0] * 0.8, yb[1] * 0.8),
-                self._np_random.uniform(2.0, 10.0),
-            ])
-            if np.linalg.norm(self.goal_position[:2] - start_pos[:2]) > 10.0:
-                break
-
-        # Obstacles selon le stage courant
-        n_obstacles = self.curriculum_stage.get("obstacle_count", 0)
-        self.obstacle_manager.generate(
-            n_obstacles,
-            exclude_zone=[(start_pos, 2.0), (self.goal_position, 2.0)],
-        )
-
-        self.wind.reset()
-        self.reward_calculator.reset()
-
-        # Si un renderer 3D est déjà actif, on resynchronise la scène
-        # (nouveaux marqueurs d'objectif et d'obstacles) sans le recréer.
-        if self._pybullet_renderer is not None:
-            self._pybullet_renderer.reset_scene(
-                self.goal_position, self.obstacle_manager.obstacles
-            )
-
-        obs = self._get_observation()
+        obs = self._get_obs()
         info = {"goal_position": self.goal_position.tolist()}
         return obs, info
 
-    # ------------------------------------------------------------------
-    def step(self, action: np.ndarray):
-        action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
+    def step(self, action):
+        action = np.clip(action, -1.0, 1.0)
+        flight_action = action[:4]
+        state = self.dynamics.step(flight_action)
 
-        distance_old = self._distance_to_goal()
+        # Mettre à jour la cellule sous le drone (pour le visuel)
+        cell = self._get_cell_under_drone()
+        if cell is not None:
+            cell.visited = True
+            # Simuler pulvérisation et irrigation (pour les couleurs)
+            if action[4] > 0.0 and not cell.healthy and not cell.sprayed:
+                cell.healthy = True
+                cell.sprayed = True
+            if action[5] > 0.0 and not cell.wet and not cell.watered:
+                cell.wet = True
+                cell.watered = True
 
-        # Injection du vent comme perturbation de vitesse
-        wind_vec = self.wind.step()
-        state = self.dynamics.step(action)
-        state.vx += wind_vec[0] * self.dt
-        state.vy += wind_vec[1] * self.dt
+        self.battery_level -= 0.001
+        self.step_count += 1
 
-        distance_new = self._distance_to_goal()
-        heading_error = self._heading_error()
+        terminated = False
+        truncated = (self.step_count >= self.max_steps)
+        reward = 0.0
 
-        # Consommation batterie (Wh) proportionnelle à throttle²
-        throttle_normalized = (action[0] + 1.0) / 2.0
-        self._last_throttle_normalized = float(throttle_normalized)  # pour le rendu 3D
-
-        power_watts = self.battery_alpha * (throttle_normalized ** 2) * 10.0  # facteur d'échelle
-        self.battery_level -= power_watts * (self.dt / 3600.0)
-        self.battery_level = max(0.0, self.battery_level)
-
-        collided = self.obstacle_manager.check_collision(state.position())
-        out_of_bounds = self.dynamics.is_out_of_bounds()
-        flipped = self.dynamics.is_flipped()
-        reached_goal = distance_new < self.success_radius
-
-        reward, reward_terms = self.reward_calculator.compute(
-            distance_old=distance_old,
-            distance_new=distance_new,
-            heading_error=heading_error,
-            action=action,
-            angular_rates=np.array([state.roll_rate, state.pitch_rate, state.yaw_rate]),
-            collided=collided,
-            out_of_bounds=out_of_bounds,
-            flipped=flipped,
-            reached_goal=reached_goal,
-        )
-
-        self.current_step += 1
-        terminated = bool(collided or out_of_bounds or flipped or reached_goal
-                           or self.battery_level <= 0.0)
-        truncated = bool(self.current_step >= self.max_steps)
-
-        obs = self._get_observation()
+        obs = self._get_obs()
         info = {
-            "reward_terms": reward_terms,
-            "distance_to_goal": distance_new,
-            "collided": collided,
-            "out_of_bounds": out_of_bounds,
-            "flipped": flipped,
-            "reached_goal": reached_goal,
+            "distance_to_goal": np.linalg.norm(state.position() - self.goal_position),
             "battery_level": self.battery_level,
+            "pesticide_level": self.pesticide_level,
+            "water_level": self.water_level,
+            "maladies_traitees": 0,
+            "sec_arrosees": 0,
+            "visited_percentage": 0.0,
+            "returning_home": self.returning_home,
         }
         return obs, reward, terminated, truncated, info
 
-    # ------------------------------------------------------------------
-    def _distance_to_goal(self) -> float:
-        return float(np.linalg.norm(self.dynamics.state.position() - self.goal_position))
+    def _get_cell_under_drone(self):
+        pos = self.dynamics.state.position()
+        x, y = pos[0], pos[1]
+        x_min, x_max = self.world_bounds["x"]
+        y_min, y_max = self.world_bounds["y"]
+        nx, ny = self.field_size
+        if x < x_min or x > x_max or y < y_min or y > y_max:
+            return None
+        i = int((x - x_min) / (x_max - x_min) * nx)
+        j = int((y - y_min) / (y_max - y_min) * ny)
+        i = np.clip(i, 0, nx-1)
+        j = np.clip(j, 0, ny-1)
+        return self.field_grid[i][j]
 
-    def _heading_error(self) -> float:
-        """Angle absolu (0 à pi) entre le cap (yaw) du drone et la direction vers la cible."""
+    def _get_obs(self):
         s = self.dynamics.state
-        direction = self.goal_position[:2] - np.array([s.x, s.y])
-        target_yaw = np.arctan2(direction[1], direction[0])
-        error = target_yaw - s.yaw
-        error = (error + np.pi) % (2 * np.pi) - np.pi
-        return abs(error)
-
-    def _get_observation(self) -> np.ndarray:
-        s = self.dynamics.state
-        max_v = self.max_velocity
-        max_d = self.max_distance
+        max_v = self.config["normalization"].get("max_velocity", 50.0)
+        max_d = self.config["normalization"].get("max_distance", 100.0)
         xb, yb, zb = self.world_bounds["x"], self.world_bounds["y"], self.world_bounds["z"]
 
-        distance_goal = self._distance_to_goal()
-        heading_err = self._heading_error()
-        nearest_obs = self.obstacle_manager.nearest_distance(s.position())
-        nearest_obs_clamped = min(nearest_obs, max_d)
+        def safe_norm(x, min_val, max_val):
+            if max_val - min_val == 0:
+                return 0.0
+            return 2.0 * (x - min_val) / (max_val - min_val) - 1.0
 
         obs = np.array([
-            normalize(s.x, xb[0], xb[1]),
-            normalize(s.y, yb[0], yb[1]),
-            normalize(s.z, zb[0], zb[1]),
-            normalize(s.vx, -max_v, max_v),
-            normalize(s.vy, -max_v, max_v),
-            normalize(s.vz, -max_v, max_v),
-            normalize(s.roll, -np.pi, np.pi),
-            normalize(s.pitch, -np.pi, np.pi),
-            normalize(s.yaw, -np.pi, np.pi),
-            normalize(s.roll_rate, -self.drone_params.max_angular_rate, self.drone_params.max_angular_rate),
-            normalize(s.pitch_rate, -self.drone_params.max_angular_rate, self.drone_params.max_angular_rate),
-            normalize(s.yaw_rate, -self.drone_params.max_angular_rate, self.drone_params.max_angular_rate),
-            normalize(distance_goal, 0, max_d),
-            normalize(heading_err, 0, np.pi),
-            normalize(self.battery_level, 0, self.battery_capacity),
-            normalize(nearest_obs_clamped, 0, max_d),
-            normalize(self.wind.magnitude(), 0, self.config["wind"]["max_speed"]),
+            safe_norm(s.x, xb[0], xb[1]),
+            safe_norm(s.y, yb[0], yb[1]),
+            safe_norm(s.z, zb[0], zb[1]),
+            safe_norm(s.vx, -max_v, max_v),
+            safe_norm(s.vy, -max_v, max_v),
+            safe_norm(s.vz, -max_v, max_v),
+            safe_norm(s.roll, -np.pi, np.pi),
+            safe_norm(s.pitch, -np.pi, np.pi),
+            safe_norm(s.yaw, -np.pi, np.pi),
+            safe_norm(s.roll_rate, -3.0, 3.0),
+            safe_norm(s.pitch_rate, -3.0, 3.0),
+            safe_norm(s.yaw_rate, -3.0, 3.0),
+            safe_norm(np.linalg.norm(s.position() - self.goal_position), 0, max_d),
+            safe_norm(0.0, 0, np.pi),
+            safe_norm(self.battery_level, 0, 1e6),
+            safe_norm(0.0, 0, max_d),
+            safe_norm(0.0, 0, 1.0),
         ], dtype=np.float32)
-
         return obs
 
-    # ------------------------------------------------------------------
     def render(self):
-        """
-        Affichage 3D temps réel via PyBullet (render_mode="human" uniquement).
-
-        Le renderer est initialisé au premier appel (lazy init) pour ne pas
-        pénaliser l'entraînement lorsque render() n'est jamais appelé.
-        Il ne fait qu'afficher l'état déjà calculé par self.dynamics —
-        aucune physique n'est recalculée par PyBullet ici.
-        """
         if self.render_mode != "human":
             return
 
-        if self._pybullet_renderer is None:
-            from environment.pybullet_renderer import PyBulletRenderer
-            self._pybullet_renderer = PyBulletRenderer(
-                urdf_path=self.config["drone"]["urdf_path"]
-            )
-            self._pybullet_renderer.reset_scene(
-                self.goal_position, self.obstacle_manager.obstacles
-            )
+        # Initialisation PyBullet
+        if self._client is None:
+            self._client = p.connect(p.GUI)
+            p.setAdditionalSearchPath(pybullet_data.getDataPath())
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+            p.resetDebugVisualizerCamera(cameraDistance=12, cameraYaw=45, cameraPitch=-35,
+                                         cameraTargetPosition=[0, 0, 2])
+            p.loadURDF("plane.urdf")
+            try:
+                self._drone_id = p.loadURDF(self._urdf_path, basePosition=[0, 0, 1])
+            except:
+                self._drone_id = p.loadURDF("sphere_small.urdf", basePosition=[0, 0, 1])
+                print("⚠️ URDF drone non trouvé, sphère utilisée.")
+            # Récupérer les joints des hélices
+            self._prop_joints = []
+            for i in range(p.getNumJoints(self._drone_id)):
+                info = p.getJointInfo(self._drone_id, i)
+                if info[1].decode("utf-8").startswith("j_p"):
+                    self._prop_joints.append(i)
 
-        self._pybullet_renderer.update(self.dynamics.state, self._last_throttle_normalized)
+        # Créer la grille de champs si pas encore faite
+        if not self._field_created and self.field_grid is not None:
+            self._create_field_grid()
+            self._field_created = True
+
+        # Mettre à jour les couleurs du champ
+        if self._field_created and self.field_grid is not None:
+            self._update_field_colors()
+
+        # Mettre à jour la position du drone
+        state = self.dynamics.state
+        pos = [state.x, state.y, state.z]
+        ori = p.getQuaternionFromEuler([state.roll, state.pitch, state.yaw])
+        p.resetBasePositionAndOrientation(self._drone_id, pos, ori)
+
+        # Hélices
+        self._prop_angle += 20.0
+        for j in self._prop_joints:
+            p.resetJointState(self._drone_id, j, self._prop_angle)
+
+        p.stepSimulation()
+
+    def _create_field_grid(self):
+        """Crée les cubes représentant les cellules du champ."""
+        nx, ny = self.field_size
+        x_min, x_max = self.world_bounds["x"]
+        y_min, y_max = self.world_bounds["y"]
+        cell_size_x = (x_max - x_min) / nx
+        cell_size_y = (y_max - y_min) / ny
+        half_x = cell_size_x * 0.45
+        half_y = cell_size_y * 0.45
+
+        for i in range(nx):
+            row = []
+            for j in range(ny):
+                x = x_min + (i + 0.5) * cell_size_x
+                y = y_min + (j + 0.5) * cell_size_y
+                z = 0.025
+                visual = p.createVisualShape(
+                    p.GEOM_BOX,
+                    halfExtents=[half_x, half_y, 0.025],
+                    rgbaColor=[0.2, 0.8, 0.2, 0.8]  # vert par défaut
+                )
+                body_id = p.createMultiBody(
+                    baseMass=0,
+                    baseVisualShapeIndex=visual,
+                    basePosition=[x, y, z]
+                )
+                row.append(body_id)
+            self._cell_ids.append(row)
+
+    def _update_field_colors(self):
+        """Met à jour les couleurs des cellules selon leur état."""
+        for i, row in enumerate(self.field_grid):
+            for j, cell in enumerate(row):
+                if i >= len(self._cell_ids) or j >= len(self._cell_ids[i]):
+                    continue
+                body_id = self._cell_ids[i][j]
+                if not cell.healthy and not cell.wet:
+                    color = [0.8, 0.2, 0.1, 0.8]  # rouge foncé
+                elif not cell.healthy:
+                    color = [0.9, 0.1, 0.1, 0.8]   # rouge
+                elif not cell.wet:
+                    color = [0.8, 0.6, 0.2, 0.8]   # jaune
+                elif cell.sprayed or cell.watered:
+                    color = [0.1, 0.5, 0.9, 0.8]   # bleu
+                else:
+                    color = [0.2, 0.8, 0.2, 0.8]   # vert
+                p.changeVisualShape(body_id, -1, rgbaColor=color)
 
     def close(self):
-        """Ferme proprement la connexion PyBullet si elle a été ouverte."""
-        if self._pybullet_renderer is not None:
-            self._pybullet_renderer.close()
-            self._pybullet_renderer = None
-
-if __name__ == "__main__":
-    import os
-    import sys  # ◄--- AJOUTER CETTE LIGNE
-    import time
-    
-   
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    print("=== Lancement de l'environnement Agri-Drone avec PyBullet ===")
-    
-    # 1. Génération de l'URDF de secours au bon emplacement
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    urdf_test_path = os.path.join(current_dir, "drone_test.urdf")
-    
-    if not os.path.exists(urdf_test_path):
-        with open(urdf_test_path, "w") as f:
-            f.write('''<robot name="test_drone">
-                <link name="base_link"><visual><geometry><box size="0.6 0.6 0.15"/></geometry><material name="blue"><color rgba="0 0 0.8 1"/></material></visual></link>
-                <link name="prop1"><visual><geometry><cylinder radius="0.25" length="0.02"/></geometry><material name="black"><color rgba="0 0 0 1"/></material></visual></link>
-                <joint name="j_p1" type="continuous"><parent link="base_link"/><child link="prop1"/><origin xyz="0.3 0.3 0.05"/></joint>
-            </robot>''')
-
-    # 2. Configuration complète requise par AgriDroneEnv
-    config_test = {
-        "world": {"size_x": 40.0, "size_y": 40.0, "ground_z": 0.0, "size_z": 30.0},
-        "drone": {
-            "dry_mass": 2.0, "payload_mass_full": 3.0, "gravity": 9.81,
-            "max_thrust_total": 100.0, "drag_coefficient": 0.1,
-            "max_tilt_angle_rad": 0.6, "max_angular_rate": 3.0,
-            "attitude_time_constant": 0.1, 
-            "urdf_path": os.path.join(current_dir, "agri_hexacopter_pro.urdf")
-        },
-        "simulation": {"dt": 0.02, "max_episode_steps": 300},
-        "normalization": {"max_velocity": 15.0, "max_distance": 60.0},
-        "battery": {"capacity_wh": 80.0, "consumption_coefficient": 0.04},
-        "goal": {"success_radius": 1.5},
-        "wind": {"max_speed": 4.0, "gust_probability": 0.05, "enabled": True},
-        "obstacles": {"min_radius": 1.0, "max_radius": 3.0, "count_stage_default": 4}
-    }
-    
-    # 3. Initialisation de l'environnement en mode "human" pour activer PyBullet
-    env = AgriDroneEnv(config=config_test, render_mode="human")
-    
-    # Démarrage d'un épisode
-    obs, info = env.reset()
-    print("🟢 Environnement connecté à PyBullet avec succès !")
-    print(f"Position cible générée : {info['goal_position']}")
-    
-    # 4. Boucle d'exécution (Simulation visuelle de 200 étapes)
-    for etape in range(200):
-        # On génère une action continue aléatoire [-1, 1] (Throttle, Roll, Pitch, Yaw)
-        action = env.action_space.sample()
-        
-        # Le drone applique l'action via drone_dynamics
-        obs, reward, terminated, truncated, info = env.step(action)
-        
-        # IMPORTANT : On appelle render() pour mettre à jour la position 3D dans PyBullet
-        env.render()
-        
-        # Ralentissement pour que la simulation soit fluide et visible à l'œil humain (~50 FPS)
-        time.sleep(0.02)
-        
-        if etape % 20 == 0:
-            print(f"Étape {etape:03d} | Distance Cible: {info['distance_to_goal']:.2f}m | Batterie: {info['battery_level']:.2f} Wh")
-            
-        if terminated or truncated:
-            print("🏁 Fin de la simulation (Objectif atteint, crash ou batterie vide) !")
-            break
-            
-    env.close()
-    print("🟢 Fenêtre PyBullet fermée proprement.")
+        if self._client is not None and p.isConnected(self._client):
+            p.disconnect(self._client)
+            self._client = None

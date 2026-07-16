@@ -9,6 +9,9 @@ dynamique, y compris pendant l'évaluation).
 
 Utilisation : uniquement en mode render_mode="human", jamais
 pendant l'entraînement massif (trop lent en boucle serrée).
+
+VERSION ÉTENDUE : affiche également une grille de cellules
+agricoles avec des couleurs représentant l'état du champ.
 """
 
 from __future__ import annotations
@@ -43,6 +46,12 @@ class PyBulletRenderer:
         self.goal_marker_id = None
         self.obstacle_ids: list[int] = []
 
+        # --- Nouveaux attributs pour la grille de champ ---
+        self.cell_ids: list[list[int]] = []  # 2D liste d'IDs des cubes
+        self.cell_size = 1.0                 # taille d'une cellule en mètres
+        self.grid_offset = (0, 0)            # décalage pour centrer la grille
+        self.field_created = False
+
     # ------------------------------------------------------------------
     def reset_scene(self, goal_position: np.ndarray, obstacles: list[dict]) -> None:
         """Recrée les marqueurs visuels (objectif + obstacles) à chaque reset()."""
@@ -74,6 +83,99 @@ class PyBulletRenderer:
             self.obstacle_ids.append(oid)
 
     # ------------------------------------------------------------------
+    def create_field_grid(self, field_size: tuple, world_bounds: dict) -> None:
+        """
+        Crée la grille de cellules agricoles.
+        field_size : (nx, ny) nombre de cellules en x et y
+        world_bounds : {"x": (xmin,xmax), "y": (ymin,ymax)}
+        """
+        if self.field_created:
+            return
+        nx, ny = field_size
+        x_min, x_max = world_bounds["x"]
+        y_min, y_max = world_bounds["y"]
+
+        self.cell_size = min((x_max - x_min) / nx, (y_max - y_min) / ny)
+        self.grid_offset = ((x_min + x_max) / 2, (y_min + y_max) / 2)
+
+        # Supprimer les anciennes cellules (au cas où)
+        for row in self.cell_ids:
+            for cid in row:
+                p.removeBody(cid)
+        self.cell_ids = []
+
+        # Créer les cellules (cubes plats, hauteur 0.05)
+        for i in range(nx):
+            row_ids = []
+            for j in range(ny):
+                # Calcul de la position du centre de la cellule
+                x = x_min + (i + 0.5) * (x_max - x_min) / nx
+                y = y_min + (j + 0.5) * (y_max - y_min) / ny
+                z = 0.025  # juste au-dessus du sol
+
+                # Forme de base (cube plat)
+                visual = p.createVisualShape(
+                    p.GEOM_BOX,
+                    halfExtents=[self.cell_size * 0.45, self.cell_size * 0.45, 0.025],
+                    rgbaColor=[0.2, 0.6, 0.2, 0.8]  # vert par défaut
+                )
+                collision = p.createCollisionShape(
+                    p.GEOM_BOX,
+                    halfExtents=[self.cell_size * 0.45, self.cell_size * 0.45, 0.025]
+                )
+                body_id = p.createMultiBody(
+                    baseMass=0,
+                    baseVisualShapeIndex=visual,
+                    baseCollisionShapeIndex=collision,
+                    basePosition=[x, y, z]
+                )
+                row_ids.append(body_id)
+            self.cell_ids.append(row_ids)
+        self.field_created = True
+
+    # ------------------------------------------------------------------
+    def update_field(self, field_grid: list[list]) -> None:
+        """
+        Met à jour les couleurs des cellules en fonction de leur état.
+        field_grid : une liste de listes de FieldCell (ou tout objet avec attributs healthy, wet, sprayed, watered)
+        """
+        if not self.field_created:
+            return
+
+        # Définition des couleurs selon l'état
+        colors = {
+            "healthy_wet": [0.2, 0.8, 0.2, 0.8],      # vert sain
+            "healthy_dry": [0.8, 0.6, 0.2, 0.8],      # jaune (sec)
+            "diseased_wet": [0.9, 0.1, 0.1, 0.8],     # rouge (malade)
+            "diseased_dry": [0.7, 0.2, 0.1, 0.8],     # orange foncé
+            "sprayed": [0.1, 0.3, 0.8, 0.8],          # bleu (pulvérisé)
+            "watered": [0.1, 0.6, 0.9, 0.8],          # bleu clair (arrosé)
+            "default": [0.5, 0.5, 0.5, 0.5]           # gris
+        }
+
+        for i, row in enumerate(field_grid):
+            for j, cell in enumerate(row):
+                if i >= len(self.cell_ids) or j >= len(self.cell_ids[i]):
+                    continue
+                body_id = self.cell_ids[i][j]
+
+                # Déterminer la couleur
+                if not cell.healthy and not cell.wet:
+                    color = colors["diseased_dry"]
+                elif not cell.healthy:
+                    color = colors["diseased_wet"]
+                elif not cell.wet:
+                    color = colors["healthy_dry"]
+                elif cell.sprayed or cell.watered:
+                    # Si traité ou arrosé, on le met en bleu pour indiquer l'intervention
+                    color = colors["watered"] if cell.watered else colors["sprayed"]
+                else:
+                    color = colors["healthy_wet"]
+
+                # Mettre à jour la couleur
+                p.changeVisualShape(body_id, -1, rgbaColor=color)
+
+    # ------------------------------------------------------------------
     def update(self, state, throttle_normalized: float) -> None:
         """
         Synchronise la pose du drone dans PyBullet avec l'état calculé
@@ -98,15 +200,12 @@ class PyBulletRenderer:
 
 if __name__ == "__main__":
     import time
-    print("=== Test autonome du Renderer PyBullet ===")
-    
-    # Configuration d'un chemin temporaire pour tester (ou utilisez votre vrai URDF)
-    # Note: Si vous n'avez pas de fichier URDF sous la main, créez un fichier "test.urdf" minimal
     import os
+    print("=== Test autonome du Renderer PyBullet ===")
+    # Création d'un URDF temporaire pour le test
     current_dir = os.path.dirname(os.path.abspath(__file__))
     urdf_test = os.path.join(current_dir, "drone_test.urdf")
     if not os.path.exists(urdf_test):
-        # Création d'un URDF de secours ultra-simple (une boîte avec 4 hélices)
         with open(urdf_test, "w") as f:
             f.write('''<robot name="test_drone">
                 <link name="base_link"><visual><geometry><box size="0.5 0.5 0.1"/></geometry></visual></link>
@@ -114,34 +213,41 @@ if __name__ == "__main__":
                 <joint name="j_p1" type="continuous"><parent link="base_link"/><child link="prop1"/><origin xyz="0.3 0.3 0.05"/></joint>
             </robot>''')
 
-    # Initialisation du renderer
     renderer = PyBulletRenderer(urdf_path=urdf_test)
-    
-    # Données fictives pour l'objectif et les obstacles
     faux_objectif = np.array([5.0, 5.0, 4.0])
-    faux_obstacles = [
-        {"pos": np.array([2.0, 2.0, 1.0]), "radius": 1.0},
-        {"pos": np.array([-3.0, 4.0, 2.0]), "radius": 1.5}
-    ]
-    
+    faux_obstacles = [{"pos": np.array([2.0, 2.0, 1.0]), "radius": 1.0}]
     renderer.reset_scene(faux_objectif, faux_obstacles)
-    
-    # Classe factice pour simuler l'objet 'state' attendu par update()
+
+    # Créer une grille fictive pour tester
+    class FakeCell:
+        def __init__(self, h, w):
+            self.healthy = h
+            self.wet = w
+            self.sprayed = False
+            self.watered = False
+
+    grid = [[FakeCell(True, True) for _ in range(10)] for _ in range(10)]
+    # Mettre quelques cellules malades et sèches
+    grid[2][3].healthy = False
+    grid[2][4].wet = False
+    grid[5][5].healthy = False
+    grid[5][5].wet = False
+    grid[7][8].sprayed = True
+
+    renderer.create_field_grid((10, 10), {"x": (-10,10), "y": (-10,10)})
+    renderer.update_field(grid)
+
     class FakeState:
         x, y, z = 0.0, 0.0, 1.0
         roll, pitch, yaw = 0.0, 0.0, 0.0
-    
+
     state = FakeState()
     print("🟢 Fenêtre PyBullet ouverte. Fermeture automatique dans 10 secondes...")
-    
-    # Boucle d'animation (simulation de mouvement)
-    for t in range(500):
-        state.z += 0.01          # Le drone monte
-        state.yaw += 0.02         # Le drone tourne sur lui-même
-        state.pitch = 0.2 * np.sin(t * 0.05) # Oscillation
-        
+    for _ in range(500):
+        state.z += 0.01
+        state.yaw += 0.02
         renderer.update(state, throttle_normalized=0.6)
-        time.sleep(0.02) # Calage à ~50 FPS
-        
+        time.sleep(0.02)
+
     renderer.close()
     print("🟢 Test terminé.")
