@@ -170,6 +170,10 @@ class DroneDynamics:
         return not (xb[0] <= s.x <= xb[1] and yb[0] <= s.y <= yb[1] and zb[0] <= s.z <= zb[1])
 
     def is_flipped(self) -> bool:
-        """Considère le drone comme retourné si roll/pitch dépasse 80°."""
+        """Considère le drone comme retourné si roll/pitch dépasse 80°.
+
+        Retourne un bool Python natif pour garantir la compatibilité
+        avec les tests utilisant `is True` / `is False`.
+        """
         limit = np.deg2rad(80)
-        return abs(self.state.roll) > limit or abs(self.state.pitch) > limit
+        return bool(abs(self.state.roll) > limit or abs(self.state.pitch) > limit)

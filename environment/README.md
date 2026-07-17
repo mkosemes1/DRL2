@@ -2,193 +2,254 @@
 
 ## 1. Présentation
 
-Ce dépôt implémente un **environnement d’apprentissage par renforcement (RL)** pour un drone agricole hexacoptère. L’environnement, nommé `AgriDroneEnv`, respecte l’API Gymnasium v1 et est conçu pour entraîner un agent à accomplir des missions agricoles complexes :
+Ce dossier implémente un **environnement d'apprentissage par renforcement (RL)** pour un drone agricole hexacoptère. L'environnement `AgriDroneEnv`, qui hérite directement de `gym.Env`, respecte l'API Gymnasium v1 et est conçu pour entraîner un agent à accomplir des missions agricoles complexes :
 
-- **Survol et cartographie** d’une parcelle
+- **Tâche d'irrigation** : arroser des groupes de plantes avec gestion de réservoir d'eau
+- **Survol et cartographie** d'une parcelle
 - **Détection et traitement** des plantes malades (pulvérisation)
-- **Irrigation** des zones sèches
 - **Retour automatique** à la base lorsque la batterie est faible
-- **Évitement d’obstacles** et gestion du vent
-
-L’environnement a été étendu par rapport à une version initiale pour intégrer ces fonctionnalités agricoles, tout en conservant une physique réaliste et une récompense composite bien calibrée.
+- **Évitement d'obstacles** et gestion du vent
 
 ---
 
-## 2. Architecture générale
+## 2. Architecture
 
-L’environnement est organisé en modules :
+```
 environment/
-├── agri_drone_env.py # Environnement principal (hérite de BaseEnv)
-├── demo_env.py # Script de démonstration avec vol en zigzag
-├── agri_hexacopter_pro.urdf # Modèle URDF du drone (pour rendu 3D)
-├── obstacles.py # Gestion des obstacles sphériques
-├── pybullet_renderer.py # Rendu 3D temps réel (PyBullet)
+├── agri_drone_env.py            # AgriDroneEnv (gym.Env) — environnement principal
+├── minimal_fly_env.py           # MinimalFlyEnv — env simplifiée (vol uniquement)
+├── demo_env.py                  # Script de démonstration avec rendu PyBullet
+├── obstacles.py                 # ObstacleManager — gestion des obstacles sphériques
+├── pybullet_renderer.py         # Rendu 3D PyBullet (découplé de la physique)
 ├── physics/
-│ ├── drone_dynamics.py # Dynamique du drone (équations physiques)
-│ └── wind_model.py # Modèle de vent avec rafales
+│   ├── drone_dynamics.py        # DroneDynamics + DroneParams + DroneState
+│   └── wind_model.py            # WindModel — modèle de vent avec rafales
 ├── reward/
-│ └── reward_function.py # Récompense composite (navigation + agricole)
+│   └── reward_function.py       # RewardCalculator + RewardConfig
 └── utils/
-└── normalization.py # Fonctions de normalisation [-1,1]
-
-
-L’environnement hérite de la classe abstraite `BaseEnv` (fournie) qui impose les méthodes `reset()`, `step()`, `close()`. Il est donc compatible avec tous les algorithmes RL (PPO, SAC, etc.).
+    └── normalization.py         # Fonctions normalize() / denormalize()
+```
 
 ---
 
-## 3. Physique du drone
+## 3. Classes principales
 
-Le modèle physique est implémenté dans `drone_dynamics.py`. Il s’agit d’un **modèle simplifié de corps rigide** avec commande en attitude.
+### 3.1 `AgriDroneEnv` (`agri_drone_env.py`)
 
-### 3.1 Équations d’état
+Environnement principal héritant de `gym.Env`. Gère la dynamique du drone, la grille du champ agricole, la tâche d'irrigation avec groupes de plantes et réservoir d'eau, ainsi que le rendu PyBullet.
 
-L’état du drone est défini par :
+**Paramètres de construction** :
+- `config` : dictionnaire de configuration (voir section 6)
+- `render_mode` : `"human"`, `"rgb_array"` ou `None`
+
+**Méthodes principales** :
+- `reset()` : réinitialise l'environnement, positionne les groupes de plantes aléatoirement
+- `step(action)` : exécute un pas de simulation (6 dims : 4 vol + 1 pulvérisation + 1 irrigation)
+- `render()` : affiche l'état via PyBullet GUI
+- `close()` : libère les ressources PyBullet
+
+### 3.2 `FieldCell` (`agri_drone_env.py`)
+
+Représente une cellule individuelle de la grille du champ agricole. Chaque cellule possède les attributs booléens : `healthy`, `wet`, `sprayed`, `watered`, `visited`.
+
+### 3.3 `DroneDynamics` (`physics/drone_dynamics.py`)
+
+Modèle physique simplifié de corps rigide avec commande en attitude. Intègre la dynamique pas de temps par pas de temps (`dt`) :
+
+- **État** : position (x, y, z), vitesse (vx, vy, vz), attitude (roll, pitch, yaw), vitesses angulaires
+- **Commande** : poussée totale (throttle), consignes d'inclinaison (roll, pitch), vitesse de lacet (yaw)
+- **Évolution** : modèle du premier ordre pour l'attitude, projection de la poussée dans le repère monde, traînée aérodynamique linéaire, saturation de vitesse
+
+### 3.4 `WindModel` (`physics/wind_model.py`)
+
+Modèle de vent simple avec rafales aléatoires. Le vent est désactivé par défaut (`enabled=False`) et peut être activé pour le Domain Randomization.
+
+### 3.5 `ObstacleManager` (`obstacles.py`)
+
+Gestion des obstacles sphériques de la parcelle. Génère des obstacles aléatoirement dans la carte, calcule la distance de surface la plus proche et détecte les collisions.
+
+### 3.6 `RewardCalculator` (`reward/reward_function.py`)
+
+Calculateur de récompense composite avec trois méthodes :
+- `compute()` : récompense de navigation de base
+- `compute_agri()` : récompense étendue avec fonctions agricoles
+- `compute_water_task()` : récompense dédiée à la tâche d'irrigation
+
+---
+
+## 4. Physique du drone
+
+Le modèle physique est implémenté dans `drone_dynamics.py`. Il s'agit d'un **modèle simplifié de corps rigide** avec commande en attitude.
+
+### 4.1 Équations d'état
+
+L'état du drone est défini par :
 
 - Position : `(x, y, z)`
 - Vitesse linéaire : `(vx, vy, vz)`
-- Attitude (angles d’Euler) : `(roll, pitch, yaw)`
+- Attitude (angles d'Euler) : `(roll, pitch, yaw)`
 - Vitesses angulaires : `(roll_rate, pitch_rate, yaw_rate)`
 
-### 3.2 Entrée de commande
+### 4.2 Entrée de commande
 
-L’action (4 premières dimensions) est :
+L'action (4 premières dimensions) est :
 
 - `throttle` ∈ [-1, 1] → converti en poussée totale `T = ((throttle+1)/2) * T_max`
-- `roll_cmd` ∈ [-1, 1] → consigne d’inclinaison en roulis `desired_roll = roll_cmd * max_tilt`
-- `pitch_cmd` ∈ [-1, 1] → consigne d’inclinaison en tangage `desired_pitch = pitch_cmd * max_tilt`
+- `roll_cmd` ∈ [-1, 1] → consigne d'inclinaison en roulis `desired_roll = roll_cmd * max_tilt`
+- `pitch_cmd` ∈ [-1, 1] → consigne d'inclinaison en tangage `desired_pitch = pitch_cmd * max_tilt`
 - `yaw_cmd` ∈ [-1, 1] → commande de vitesse de lacet `desired_yaw_rate = yaw_cmd * max_angular_rate`
 
-### 3.3 Évolution temporelle
+### 4.3 Évolution temporelle
 
 **Attitude** : les angles de roulis et tangage suivent un modèle du premier ordre vers leur consigne :
+```
 roll_rate = (desired_roll - roll) / tau
 pitch_rate = (desired_pitch - pitch) / tau
+```
 
 **Accélération** : la poussée est projetée dans le repère monde :
-ax = (T/m) * (cos(roll)sin(pitch)cos(yaw) + sin(roll)sin(yaw))
-ay = (T/m) * (cos(roll)sin(pitch)sin(yaw) - sin(roll)cos(yaw))
+```
+ax = (T/m) * (cos(roll)*sin(pitch)*cos(yaw) + sin(roll)*sin(yaw))
+ay = (T/m) * (cos(roll)*sin(pitch)*sin(yaw) - sin(roll)*cos(yaw))
 az = (T/m) * cos(roll)*cos(pitch) - g
-
-## 4. Modélisation du champ agricole
-
-Le champ est discrétisé en une grille de cellules (ex : 20×20). Chaque cellule possède les attributs :
-
-- `healthy` : booléen (True = plante saine, False = malade)
-- `wet` : booléen (True = humide, False = sec)
-- `sprayed` : booléen (True = déjà pulvérisée)
-- `watered` : booléen (True = déjà arrosée)
-- `visited` : booléen (True = survolée au moins une fois)
-
-À chaque épisode, l’état initial des cellules est généré aléatoirement avec les probabilités `disease_probability` et `dry_probability`.
-
-Le drone peut agir sur une cellule lorsqu’il la survole (position projetée sur le plan horizontal) :
-
-- **Pulvérisation** (`spray_on > 0`) : si la cellule est malade et non encore traitée, elle devient saine et la quantité de pesticide diminue.
-- **Irrigation** (`irrigate_on > 0`) : si la cellule est sèche et non encore arrosée, elle devient humide et le niveau d’eau diminue.
-
-**Cartographie** : chaque cellule survolée est marquée `visited = True`.
+```
 
 ---
 
-## 5. Espaces d’observation et d’action
+## 5. Modélisation du champ agricole
 
-### 5.1 Espace d’observation (24 dimensions, normalisées [-1,1])
+Le champ est discrétisé en une grille de cellules (par défaut 20×20). Chaque cellule possède les attributs :
 
-| Indice | Description |
-|--------|-------------|
-| 0–2    | Position (x, y, z) |
-| 3–5    | Vitesse linéaire (vx, vy, vz) |
-| 6–8    | Attitude (roll, pitch, yaw) |
-| 9–11   | Vitesses angulaires (roll_rate, pitch_rate, yaw_rate) |
-| 12     | Distance à l’objectif (cible courante) |
-| 13     | Erreur de cap (heading) |
-| 14     | Niveau de batterie |
-| 15     | Distance à l’obstacle le plus proche |
-| 16     | Intensité du vent |
-| 17     | Niveau de pesticide restant |
-| 18     | Niveau d’eau restant |
-| 19     | Pourcentage de maladies traitées |
-| 20     | Pourcentage de zones sèches arrosées |
-| 21     | Pourcentage de cartographie (cellules visitées) |
-| 22     | Distance à la base |
-| 23     | Booléen : retour à la base (1) ou non (-1) |
+- `healthy` : True si la plante est saine, False si malade
+- `wet` : True si le sol est humide, False s'il est sec
+- `sprayed` : True si la cellule a déjà été pulvérisée
+- `watered` : True si la cellule a déjà été arrosée
+- `visited` : True si le drone a survolé cette cellule
 
-### 5.2 Espace d’action (6 dimensions continues)
+À chaque épisode, l'état initial des cellules est généré aléatoirement (15 % de maladies, 15 % de zones sèches).
 
-- `[throttle, roll_cmd, pitch_cmd, yaw_cmd]` : commandes de vol (∈ [-1,1])
-- `spray_on` : ∈ [-1,1] ; interprété comme activé si > 0
-- `irrigate_on` : ∈ [-1,1] ; interprété comme activé si > 0
+Le drone peut agir sur une cellule lorsqu'il la survole :
+- **Pulvérisation** (`action[4] > 0`) : si la cellule est malade et non traitée, elle devient saine
+- **Irrigation** (`action[5] > 0`) : si la cellule est sèche et non arrosée, elle devient humide
 
 ---
 
-## 6. Fonction de récompense
+## 6. Espaces d'observation et d'action
 
-La récompense est composite et conçue pour guider l’agent vers un comportement efficace et sécurisé. Elle est calculée à chaque pas par la méthode `compute_agri()` de `reward_function.py`.
+### 6.1 Espace d'observation
 
-### 6.1 Termes de navigation (hérités)
+Le vecteur d'observation est normalisé dans `[-1, 1]`. Sa dimension totale est **17 + 3 + 1 + N×4** (par défaut N=5 → 39 dimensions).
 
-| Terme | Formule |
-|-------|---------|
-| **Progression** | `k_progress * (distance_old - distance_new)` |
-| **Cap** | `heading_weight * (2*(1 - heading_error/π) - 1)` |
-| **Lissage** | `-smooth_weight * ||action - action_prev||` |
-| **Énergie** | `-energy_alpha * throttle_normalized²` |
-| **Stabilité** | `-stability_weight * sum(angular_rates²)` |
-| **Temps** | `-time_penalty` (constant) |
-| **Pénalités terminales** | `-collision_penalty` (crash), `-out_of_bounds_penalty`, `-flip_penalty` |
+| Plage | Dims | Description |
+|-------|------|-------------|
+| 0–2 | 3 | Position du drone (x, y, z) |
+| 3–5 | 3 | Vitesse linéaire (vx, vy, vz) |
+| 6–8 | 3 | Attitude (roll, pitch, yaw) |
+| 9–11 | 3 | Vitesses angulaires (roll_rate, pitch_rate, yaw_rate) |
+| 12 | 1 | Distance à l'objectif |
+| 13 | 1 | Erreur de cap (heading error) |
+| 14 | 1 | Niveau de batterie |
+| 15 | 1 | Distance à l'obstacle le plus proche |
+| 16 | 1 | Intensité du vent |
+| 17–19 | 3 | Coordonnées de la bassine d'eau (x, y, z) |
+| 20 | 1 | Niveau du réservoir d'eau (0–100) |
+| 21+ | N×4 | Matrice des groupes de plantes (x, y, z, is_watered) |
 
-### 6.2 Termes agricoles (ajoutés)
+### 6.2 Espace d'action (6 dimensions continues)
 
-| Terme | Formule |
-|-------|---------|
-| **Santé** | `health_bonus * (maladies_traitees / max(1, total_malades))` |
-| **Irrigation** | `irrigation_bonus * (sec_arrosees / max(1, total_sec))` |
-| **Exploration** | `exploration_bonus * visited_percentage` |
-| **Gaspillage pesticide** | `-waste_penalty` si pulvérisation sans maladie |
-| **Gaspillage eau** | `-waste_penalty` si irrigation sans zone sèche |
-| **Batterie faible** | `-low_battery_penalty` si batterie < 10 Wh et pas en retour |
-| **Objectif atteint** | `+goal_reward` (mission accomplie) |
-
-La récompense totale est la somme de tous ces termes.
-
----
-
-## 7. Curriculum Learning et Domain Randomization
-
-Pour faciliter l’apprentissage et améliorer la généralisation, l’environnement supporte :
-
-- **Nombre d’obstacles** variable (via `curriculum_stage["obstacle_count"]`)
-- **Activation du vent** (via `curriculum_stage["wind_enabled"]`)
-- **Randomisation de la masse** du drone (masse de la cuve variable)
-
-Ces paramètres peuvent être modifiés par un `CurriculumManager` externe entre les épisodes.
+| Indice | Nom | Description |
+|--------|-----|-------------|
+| 0 | `throttle` | Poussée totale (0–100 %) |
+| 1 | `roll_cmd` | Consigne d'inclinaison en roulis |
+| 2 | `pitch_cmd` | Consigne d'inclinaison en tangage |
+| 3 | `yaw_cmd` | Commande de vitesse de lacet |
+| 4 | `spray_on` | Pulvérisation (activée si > 0) |
+| 5 | `irrigate_on` | Irrigation (activée si > 0) |
 
 ---
 
-## 8. Rendu 3D
+## 7. Tâche d'irrigation (Water Task)
 
-Le rendu 3D est assuré par `PyBulletRenderer`, qui :
+La tâche principale de l'environnement est d'arroser N groupes de plantes répartis aléatoirement dans la carte.
+
+### Mécanique
+
+1. **Arrosage** : lorsqu'un groupe non arrosé est à moins de 2 m du drone et que le réservoir contient assez d'eau, le groupe est marqué comme arrosé et `water_consumption` unités sont déduites du réservoir.
+2. **Remplissage** : lorsque le drone se trouve dans le rayon `basin_refill_radius` de la bassine, le réservoir est remis à 100.
+3. **Fin de mission** : l'épisode se termine avec succès (`terminated=True`) lorsque tous les groupes sont arrosés.
+
+### Configuration
+
+```python
+"water_task": {
+    "basin_position": [15.0, 15.0, 0.5],  # Position (x, y, z) de la bassine
+    "basin_refill_radius": 3.0,            # Rayon de remplissage (m)
+    "water_consumption": 2.0,              # Eau consommée par arrosage
+    "num_plant_groups": 5,                 # Nombre de groupes de plantes
+}
+```
+
+---
+
+## 8. Fonction de récompense
+
+La récompense est composite et calculée par `RewardCalculator`. Pour la tâche d'irrigation, elle utilise la méthode `compute_water_task()` :
+
+| Terme | Valeur par défaut | Description |
+|-------|-------------------|-------------|
+| `watering_reward` | +5.0 | Arrosage réussi d'un groupe |
+| `refill_reward` | +1.0 | Remplissage du réservoir à la bassine |
+| `time_penalty_per_group` | −0.02 | Pénalité par groupe non arrosé |
+| `distance_shaping_reward` | +0.05 | Bonus si le drone se rapproche du groupe le plus proche |
+| `mission_complete_reward` | +100.0 | Bonus terminal quand tous les groupes sont arrosés |
+
+---
+
+## 9. Rendu 3D
+
+Le rendu 3D est assuré par PyBullet, intégré directement dans `AgriDroneEnv` :
 
 - Charge le modèle URDF du drone (`agri_hexacopter_pro.urdf`)
-- Affiche le drone, les obstacles, l’objectif et la base
+- Affiche la grille du champ avec des couleurs dynamiques selon l'état des cellules
 - Anime les hélices proportionnellement au throttle
-- Est **découplé** de la physique d’entraînement : le rendu n’est activé que si `render_mode="human"` et ne recalcule aucune physique, ce qui permet un entraînement rapide.
+- Est **découplé** de la physique d'entraînement : le rendu n'est activé que si `render_mode="human"`
+
+### Couleurs des cellules
+
+| État | Couleur |
+|------|---------|
+| Malade et sec | Rouge foncé |
+| Malade | Rouge |
+| Sec | Jaune |
+| Pulvérisée ou arrosée | Bleu |
+| Saine et humide | Vert |
 
 ---
 
-## 9. Installation et utilisation
+## 10. Utilisation
 
-### 9.1 Dépendances
-
-Le fichier `requirements.txt` (ou `pyproject.toml`) doit contenir :
-numpy
-gymnasium
-pybullet
-matplotlib (optionnel pour logs)
-stable-baselines3 (pour l’entraînement)
-
-### 9.2 Lancement de la démonstration
+### Lancement de la démonstration
 
 ```bash
 cd environment
-uv run demo_env.py
+uv run demo_env.py          # Env principale avec grille de champs
+uv run minimal_fly_env.py   # Env simplifiée (vol uniquement)
+```
+
+### Tests manuels
+
+```bash
+cd environment
+python test_dynamics.py     # Script de test de la dynamique (pas pytest)
+```
+
+### Dépendances
+
+```
+numpy
+gymnasium
+pybullet
+stable-baselines3
+torch
+wandb
+```

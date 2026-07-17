@@ -18,7 +18,13 @@ import numpy as np
 
 
 def normalize(value: float, min_val: float, max_val: float) -> float:
-    """Ramène `value` de [min_val, max_val] vers [-1, 1], avec clipping."""
+    """Ramène `value` de [min_val, max_val] vers [-1, 1], avec clipping.
+
+    Si la plage [min_val, max_val] est nulle (min == max), retourne 0.0
+    pour éviter une division par zéro.
+    """
+    if max_val - min_val == 0:
+        return 0.0
     normalized = 2.0 * (value - min_val) / (max_val - min_val) - 1.0
     return float(np.clip(normalized, -1.0, 1.0))
 

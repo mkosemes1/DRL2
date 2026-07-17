@@ -57,7 +57,7 @@ pytest==9.1.1
 python-dateutil==2.9.0.post0
 pyyaml==6.0.3
 requests==2.34.2
-rl-template==0.1.1
+rl-template==0.1.2
 sentry-sdk==2.65.0
 setuptools==83.0.0
 six==1.17.0

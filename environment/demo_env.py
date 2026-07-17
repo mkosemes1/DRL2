@@ -36,6 +36,12 @@ config = {
     },
     "simulation": {"dt": 0.02, "max_episode_steps": 1000},
     "normalization": {"max_velocity": 50.0, "max_distance": 100.0},
+    "water_task": {
+        "basin_position": [15.0, 15.0, 0.5],
+        "basin_refill_radius": 3.0,
+        "water_consumption": 2.0,
+        "num_plant_groups": 5,
+    },
 }
 
 env = AgriDroneEnv(config=config, render_mode="human")

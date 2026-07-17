@@ -11,8 +11,15 @@ Agricultural drone RL environment (Gymnasium API) for training a hexacopter agen
 uv run environment/demo_env.py        # Full agri environment with field grid
 uv run environment/minimal_fly_env.py  # Minimal fly-only env (no agri logic)
 
-# Tests (pytest is installed but no pytest-compatible tests exist yet)
-# environment/test_dynamics.py is a manual script, not a pytest test
+# Tests (279 pytest-compatible tests)
+uv run python -m pytest environment/tests/ -v                                   # All tests
+uv run python -m pytest environment/tests/test_reward_function.py -v            # Reward tests
+uv run python -m pytest environment/tests/test_agri_drone_env.py -v             # Env tests
+uv run python -m pytest environment/tests/test_drone_dynamics.py -v             # Dynamics tests
+uv run python -m pytest environment/tests/test_integration.py -v                # Integration tests
+uv run python -m pytest environment/tests/test_edge_cases.py -v                 # Edge case tests
+
+# Legacy manual test (not pytest-compatible)
 cd environment && python test_dynamics.py
 
 # Install dependencies
@@ -24,7 +31,7 @@ uv pip install -r requirements.txt
 ```
 DRL2/
 ├── environment/               # Main package
-│   ├── agri_drone_env.py      # AgriDroneEnv (gym.Env) — primary env
+│   ├── agri_drone_env.py      # AgriDroneEnv (BaseEnv) — primary env with water task
 │   ├── minimal_fly_env.py     # MinimalFlyEnv — stripped-down fly-only env
 │   ├── demo_env.py            # Demo runner for AgriDroneEnv
 │   ├── obstacles.py           # ObstacleManager (spherical obstacles)
@@ -33,17 +40,73 @@ DRL2/
 │   │   ├── drone_dynamics.py  # DroneDynamics + DroneParams + DroneState
 │   │   └── wind_model.py      # WindModel (gusts, domain randomization)
 │   ├── reward/
-│   │   ├── reward_function.py # RewardCalculator (nav + agri rewards)
+│   │   ├── reward_function.py # RewardCalculator (nav + agri + water task rewards)
 │   │   └── physics/           # ⚠️ DUPLICATE of physics/ — has DEBUG=True, do not use
+│   ├── tests/                 # 279 pytest-compatible tests
+│   │   ├── test_drone_dynamics.py
+│   │   ├── test_wind_model.py
+│   │   ├── test_obstacles.py
+│   │   ├── test_normalization.py
+│   │   ├── test_reward_function.py
+│   │   ├── test_agri_drone_env.py
+│   │   ├── test_field_cell.py
+│   │   ├── test_minimal_fly_env.py
+│   │   ├── test_demo_config.py
+│   │   ├── test_integration.py
+│   │   ├── test_edge_cases.py
+│   │   ├── test_base_env_interface.py
+│   │   ├── test_agent_model.py
+│   │   └── test_training_pipeline.py
 │   └── utils/
 │       └── normalization.py   # normalize() / denormalize() to [-1, 1]
 ├── agent/
-│   └── model.py               # Empty — agent model not yet implemented
-├── train.py                   # Empty — training pipeline not yet implemented
+│   └── model.py               # Agent PPO (BaseAgent) — acteur-critique MLP
+├── train.py                   # Trainer PPO (BaseTrain) — pipeline d'entraînement
 ├── requirements.txt           # Pinned deps (gymnasium, pybullet, stable-baselines3, torch, wandb)
-├── specify.md                 # Empty
-└── update.md                  # Empty
+├── specify.md                 # MDP specification (observation space, water task, rewards)
+├── README.md                  # Project documentation (French)
+└── update.md                  # Session changelog
 ```
+
+## Observation Space
+
+The observation space has `17 + 3 + 1 + N*4` dimensions (default N=5 → 39 dims):
+
+| Dims | Description |
+|------|-------------|
+| 0–16 | Drone state (position, velocity, attitude, angular rates, goal distance, heading error, battery, obstacle dist, wind) |
+| 17–19 | Water basin coordinates (x, y, z) |
+| 20 | Water tank level (0–100, normalized to [-1, 1]) |
+| 21–20+N*4 | Plant groups matrix (x, y, z, is_watered) per group, is_watered normalized to [-1, 1] |
+
+## Action Space
+
+6 continuous dimensions in [-1, 1]:
+
+| Dim | Action |
+|-----|--------|
+| 0 | Throttle |
+| 1 | Roll |
+| 2 | Pitch |
+| 3 | Yaw |
+| 4 | Spray (>0 = activate) |
+| 5 | Irrigate (>0 = activate) |
+
+## Water Task Mechanics
+
+- **Watering**: When drone is within `watering_proximity` (default 2.0m) of an unwatered plant group and `action[5] > 0` and tank >= 2.0, the group is marked watered and tank decreases by `water_consumption` (default 2.0).
+- **Refilling**: When drone is within `basin_refill_radius` (default 3.0m) of the water basin, tank refills to 100.0. Reward +1.0 only if tank was below 98.0.
+- **Mission complete**: When all plant groups are watered, episode terminates with +100.0 bonus.
+
+## Reward Structure (water task)
+
+| Term | Value | Trigger |
+|------|-------|---------|
+| watering | +5.0 | A plant group transitions to watered |
+| refill | +1.0 | Tank refilled at basin (only if tank < 98.0) |
+| time_penalty | -0.02 × num_unwatered | Every step |
+| distance_shaping | +0.05 | Drone moved closer to nearest unwatered group |
+| mission_complete | +100.0 | All groups watered (early stop) |
 
 ## Critical Gotchas
 
@@ -51,15 +114,15 @@ DRL2/
 
 2. **Duplicate physics code** — `environment/reward/physics/` contains copies of `drone_dynamics.py` and `wind_model.py` with `DEBUG=True` enabled. The canonical versions are in `environment/physics/`. Never import from `reward/physics/`.
 
-3. **No pytest-compatible tests** — `environment/test_dynamics.py` is a manual script with `time.sleep()` calls. No test suite exists. Run it manually: `cd environment && python test_dynamics.py`.
+3. **BaseEnv integration** — `AgriDroneEnv` inherits from `rl_template.env.BaseEnv` (not directly from `gym.Env`). The `step()` method accepts both numpy arrays and torch tensors (converted via `np.asarray`). The `rollout_phase()` in `BaseTrain` passes torch tensors to `step()`.
 
-4. **Empty implementation files** — `train.py` and `agent/model.py` are both empty. Training pipeline and agent model are not yet built.
+4. **Continuous action PPO** — `BaseTrain.rollout_phase()` uses `.item()` on actions which breaks for continuous (6D) actions. The custom `Trainer.rollout_phase()` in `train.py` overrides this to handle numpy arrays correctly. `PPOTrainer.update()` from rl_template also has shape mismatches with continuous actions — `Trainer.update_weights()` implements the PPO loop directly with proper log-prob summing over action dimensions.
 
 5. **`rl-template==0.1.1`** is in requirements but unused — this is the intended framework for the training pipeline.
 
-6. **README vs code mismatch** — `environment/README.md` describes 24-dim observation space and a `BaseEnv` parent class; actual code uses 17-dim obs and `gym.Env` directly. Trust the code.
+6. **Documentation language** — all comments, docstrings, and README content are written in French (per project convention set in `.opencode/agents/subagent/senior.md`).
 
-7. **Documentation language** — all comments, docstrings, and README content are written in French (per project convention set in `.opencode/agents/subagent/senior.md`).
+7. **Use `uv run`** for all Python commands — the project uses a `.venv` with Python 3.12 managed by `uv`. Direct `python` calls may use system Python and miss dependencies.
 
 ## Agent Workflow
 
@@ -76,9 +139,9 @@ Workflow: reviewer plans → researcher implements → test-researcher validates
 
 Tests must be written as pytest-compatible (no `time.sleep()`, no manual scripts). Run with:
 ```bash
-cd /home/darrius/project/DRL2 && python -m pytest environment/ -v
+cd /home/darrius/project/DRL2 && uv run python -m pytest environment/tests/ -v
 ```
-Currently no pytest tests exist. New tests should cover: DroneDynamics, WindModel, ObstacleManager, RewardCalculator, AgriDroneEnv step/reset, normalization utils.
+279 tests exist covering: DroneDynamics, WindModel, ObstacleManager, RewardCalculator (including compute_water_task), AgriDroneEnv step/reset/observation, normalization utils, FieldCell, MinimalFlyEnv, demo config, integration flows, edge cases, BaseEnv interface compliance, Agent PPO model, and training pipeline.
 
 ## Python Version
 
