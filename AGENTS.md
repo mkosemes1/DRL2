@@ -11,7 +11,7 @@ Agricultural drone RL environment (Gymnasium API) for training a hexacopter agen
 uv run environment/demo_env.py        # Full agri environment with field grid
 uv run environment/minimal_fly_env.py  # Minimal fly-only env (no agri logic)
 
-# Tests (279 pytest-compatible tests)
+# Tests (323 pytest-compatible tests)
 uv run python -m pytest environment/tests/ -v                                   # All tests
 uv run python -m pytest environment/tests/test_reward_function.py -v            # Reward tests
 uv run python -m pytest environment/tests/test_agri_drone_env.py -v             # Env tests
@@ -42,7 +42,7 @@ DRL2/
 │   ├── reward/
 │   │   ├── reward_function.py # RewardCalculator (nav + agri + water task rewards)
 │   │   └── physics/           # ⚠️ DUPLICATE of physics/ — has DEBUG=True, do not use
-│   ├── tests/                 # 279 pytest-compatible tests
+│   ├── tests/                 # 323 pytest-compatible tests
 │   │   ├── test_drone_dynamics.py
 │   │   ├── test_wind_model.py
 │   │   ├── test_obstacles.py
@@ -56,12 +56,13 @@ DRL2/
 │   │   ├── test_edge_cases.py
 │   │   ├── test_base_env_interface.py
 │   │   ├── test_agent_model.py
-│   │   └── test_training_pipeline.py
+│   │   ├── test_training_pipeline.py
+│   │   └── test_trainer_integration.py  # Tests d'intégration end-to-end Trainer
 │   └── utils/
 │       └── normalization.py   # normalize() / denormalize() to [-1, 1]
 ├── agent/
 │   └── model.py               # Agent PPO (BaseAgent) — acteur-critique MLP
-├── train.py                   # Trainer PPO (BaseTrain) — pipeline d'entraînement
+├── train.py                   # Trainer PPO (BaseTrain) — pipeline d'entraînement avec tqdm/wandb
 ├── requirements.txt           # Pinned deps (gymnasium, pybullet, stable-baselines3, torch, wandb)
 ├── specify.md                 # MDP specification (observation space, water task, rewards)
 ├── README.md                  # Project documentation (French)
@@ -124,6 +125,32 @@ The observation space has `17 + 3 + 1 + N*4` dimensions (default N=5 → 39 dims
 
 7. **Use `uv run`** for all Python commands — the project uses a `.venv` with Python 3.12 managed by `uv`. Direct `python` calls may use system Python and miss dependencies.
 
+## Training Pipeline (Session 5)
+
+`Trainer` in `train.py` properly extends `BaseTrain` from `rl_template`:
+
+- **Overrides only 2 methods**:
+  - `rollout_phase(state)`: Fixes `.item()` crash for 6D actions → uses `.cpu().numpy()`. Sums log-probs over action dims before `buffer.insert()` for scalar storage.
+  - `update_weights(step)`: Implements PPO loop directly with log-prob summing (`new_log_probs.sum(dim=-1)` vs `old_log_probs`) to avoid shape mismatch.
+- **Reuses**: `save_model()` from `BaseTrain` (no override needed).
+- **Adds**: `tqdm` progress bars, `wandb` logging (optional), `_init_wandb()`, `_log_wandb()`.
+- **Buffer**: Created with `action_shape=(act_dim,)` for continuous 6D actions.
+
+Usage:
+```python
+from train import Trainer
+from rl_template.config import PPOConfig, TrainConfig
+
+trainer = Trainer(env=env, agent=agent, train_config=train_cfg, ppo_config=ppo_cfg)
+trainer.train(verbose=True)  # tqdm + wandb
+```
+
+Key constants:
+- `rollout_steps`: Number of steps per rollout (default 128)
+- `batch_size`: Mini-batch size (default 64)
+- `ppo_config`: lr, gamma, gae_lambda, clip_eps
+- `wandb_config`: Optional dict with project, entity, name, config
+
 ## Agent Workflow
 
 This repo uses OpenCode multi-agent setup (`.opencode/agents/`):
@@ -141,7 +168,7 @@ Tests must be written as pytest-compatible (no `time.sleep()`, no manual scripts
 ```bash
 cd /home/darrius/project/DRL2 && uv run python -m pytest environment/tests/ -v
 ```
-279 tests exist covering: DroneDynamics, WindModel, ObstacleManager, RewardCalculator (including compute_water_task), AgriDroneEnv step/reset/observation, normalization utils, FieldCell, MinimalFlyEnv, demo config, integration flows, edge cases, BaseEnv interface compliance, Agent PPO model, and training pipeline.
+323 tests exist covering: DroneDynamics, WindModel, ObstacleManager, RewardCalculator (including compute_water_task), AgriDroneEnv step/reset/observation, normalization utils, FieldCell, MinimalFlyEnv, demo config, integration flows, edge cases, BaseEnv interface compliance, Agent PPO model, training pipeline (Trainer rollout/update/save/wandb), **Trainer integration (instantiation, full training loop, loss evolution, model saving, buffer/PPO, metrics, edge cases)**, and buffer/PPO integration.
 
 ## Python Version
 

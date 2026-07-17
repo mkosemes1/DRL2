@@ -149,6 +149,7 @@ class AgriDroneEnv(BaseEnv):
         self._prop_angle = 0.0
         self._urdf_path = drone_cfg.get("urdf_path", os.path.join(os.path.dirname(__file__), "agri_hexacopter_pro.urdf"))
         self._field_created = False
+        self._headless_initialized = False  # client PyBullet DIRECT pour rendu headless
         self._cell_ids = []  # pour stocker les IDs des cubes
 
     def reset(self, seed=None):
@@ -480,30 +481,151 @@ class AgriDroneEnv(BaseEnv):
         return obs
 
     def render(self):
-        """Affiche l'état actuel de l'environnement via PyBullet GUI.
+        """Rendu de l'environnement selon le mode configuré.
 
-        Lors du premier appel, initialise le client PyBullet, charge le
-        modèle URDF du drone (ou une sphère de secours), crée le sol
-        et configure la caméra. À chaque appel subsequent, met à jour
-        la position et l'orientation du drone, fait tourner les hélices,
-        et synchronise les couleurs de la grille du champ.
+        Modes supportés :
+          - ``"human"`` : affiche la fenêtre PyBullet GUI en temps réel.
+          - ``"rgb_array"`` : capture une image RGB sans fenêtre (headless)
+            et la retourne comme tableau numpy de forme ``(H, W, 3)``.
+          - ``None`` : ne fait rien.
 
-        Cette méthode n'est exécutée que si ``render_mode == "human"``.
+        Returns:
+            Tableau numpy ``(H, W, 3)`` dtype ``uint8`` si
+            ``render_mode == "rgb_array"``, sinon ``None``.
         """
-        if self.render_mode != "human":
+        if self.render_mode is None:
+            return None
+
+        if self.render_mode == "rgb_array":
+            return self._render_rgb_array()
+
+        if self.render_mode == "human":
+            return self._render_human()
+
+        return None
+
+    def _init_headless(self):
+        """Initialise PyBullet en mode DIRECT (sans GUI) pour le rendu headless.
+
+        Crée une connexion PyBullet sans fenêtre, charge le modèle URDF
+        du drone (ou une sphère de secours), le sol, et configure la
+        caméra pour la capture d'images.
+        """
+        if self._headless_initialized:
             return
 
+        self._client = p.connect(p.DIRECT)
+        p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=self._client)
+        p.resetDebugVisualizerCamera(
+            cameraDistance=15, cameraYaw=45, cameraPitch=-30,
+            cameraTargetPosition=[0, 0, 2], physicsClientId=self._client,
+        )
+
+        # Sol
+        p.loadURDF("plane.urdf", physicsClientId=self._client)
+
+        # Drone
+        try:
+            self._drone_id = p.loadURDF(
+                self._urdf_path, basePosition=[0, 0, 1],
+                physicsClientId=self._client,
+            )
+        except Exception:
+            self._drone_id = p.loadURDF(
+                "sphere_small.urdf", basePosition=[0, 0, 1],
+                physicsClientId=self._client,
+            )
+
+        # Récupérer les joints des hélices
+        self._prop_joints = []
+        for i in range(p.getNumJoints(self._drone_id, physicsClientId=self._client)):
+            info = p.getJointInfo(self._drone_id, i, physicsClientId=self._client)
+            if info[1].decode("utf-8").startswith("j_p"):
+                self._prop_joints.append(i)
+
+        self._headless_initialized = True
+
+    def _render_rgb_array(self):
+        """Capture une image RGB de la scène en mode headless.
+
+        Initialise PyBullet en mode DIRECT si nécessaire, met à jour
+        la position du drone et les couleurs du champ, puis capture
+        une image via ``getCameraImage()``.
+
+        Returns:
+            Tableau numpy ``(H, W, 3)`` dtype ``uint8`` représentant
+            l'image RGB de la scène.
+        """
+        self._init_headless()
+
+        # Créer la grille si nécessaire
+        if not self._field_created and self.field_grid is not None:
+            self._create_field_grid()
+            self._field_created = True
+
+        # Mettre à jour les couleurs du champ
+        if self._field_created and self.field_grid is not None:
+            self._update_field_colors()
+
+        # Mettre à jour la position du drone
+        state = self.dynamics.state
+        pos = [state.x, state.y, state.z]
+        ori = p.getQuaternionFromEuler([state.roll, state.pitch, state.yaw])
+        p.resetBasePositionAndOrientation(
+            self._drone_id, pos, ori, physicsClientId=self._client,
+        )
+
+        # Hélices
+        self._prop_angle += 20.0
+        for j in self._prop_joints:
+            p.resetJointState(
+                self._drone_id, j, self._prop_angle,
+                physicsClientId=self._client,
+            )
+
+        p.stepSimulation(physicsClientId=self._client)
+
+        # Capturer l'image
+        width, height = 640, 480
+        view_matrix = p.computeViewMatrix(
+            cameraEyePosition=[12, 12, 8],
+            cameraTargetPosition=[0, 0, 2],
+            cameraUpVector=[0, 0, 1],
+            physicsClientId=self._client,
+        )
+        proj_matrix = p.computeProjectionMatrixFOV(
+            fov=60, aspect=width / height, nearVal=0.1, farVal=100.0,
+            physicsClientId=self._client,
+        )
+        _, _, rgb_img, _, _ = p.getCameraImage(
+            width, height, view_matrix, proj_matrix,
+            physicsClientId=self._client,
+        )
+
+        # Convertir en tableau numpy (H, W, 3)
+        rgb_array = np.array(rgb_img, dtype=np.uint8).reshape(height, width, 4)[:, :, :3]
+        return rgb_array
+
+    def _render_human(self):
+        """Rendu en mode GUI PyBullet (fenêtre temps réel).
+
+        Identique à l'ancienne implémentation : initialise PyBullet
+        en mode GUI, charge le drone, anime les hélices et affiche
+        la grille du champ.
+        """
         # Initialisation PyBullet
         if self._client is None:
             self._client = p.connect(p.GUI)
             p.setAdditionalSearchPath(pybullet_data.getDataPath())
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
-            p.resetDebugVisualizerCamera(cameraDistance=12, cameraYaw=45, cameraPitch=-35,
-                                         cameraTargetPosition=[0, 0, 2])
+            p.resetDebugVisualizerCamera(
+                cameraDistance=12, cameraYaw=45, cameraPitch=-35,
+                cameraTargetPosition=[0, 0, 2],
+            )
             p.loadURDF("plane.urdf")
             try:
                 self._drone_id = p.loadURDF(self._urdf_path, basePosition=[0, 0, 1])
-            except:
+            except Exception:
                 self._drone_id = p.loadURDF("sphere_small.urdf", basePosition=[0, 0, 1])
                 print("⚠️ URDF drone non trouvé, sphère utilisée.")
             # Récupérer les joints des hélices
@@ -534,6 +656,7 @@ class AgriDroneEnv(BaseEnv):
             p.resetJointState(self._drone_id, j, self._prop_angle)
 
         p.stepSimulation()
+        return None
 
     def _create_field_grid(self):
         """Crée les cubes PyBullet représentant visuellement les cellules du champ.
@@ -598,11 +721,11 @@ class AgriDroneEnv(BaseEnv):
                 p.changeVisualShape(body_id, -1, rgbaColor=color)
 
     def close(self):
-        """Ferme la connexion PyBullet et libère les ressources associées.
+        """Ferme les connexions PyBullet et libère les ressources.
 
-        Déconnecte le client PyBullet s'il est actif et réinitialise
-        l'identifiant du client à ``None``.
+        Déconnecte les clients GUI et DIRECT s'ils sont actifs.
         """
         if self._client is not None and p.isConnected(self._client):
             p.disconnect(self._client)
             self._client = None
+        self._headless_initialized = False

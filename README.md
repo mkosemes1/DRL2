@@ -31,8 +31,8 @@ DRL2/
 │   └── utils/
 │       └── normalization.py         # Fonctions normalize() / denormalize()
 ├── agent/
-│   └── model.py                     # (vide — modèle d'agent à implémenter)
-├── train.py                         # (vide — pipeline d'entraînement à implémenter)
+│   └── model.py                     # Agent PPO (BaseAgent) — réseau acteur-critique MLP
+├── train.py                         # Trainer PPO (BaseTrain) — pipeline d'entraînement PPO
 ├── requirements.txt                 # Dépendances pinées
 └── README.md                        # Ce fichier
 ```
@@ -177,6 +177,76 @@ cd environment && python minimal_fly_env.py
 # Script de test de la dynamique (pas pytest — script manuel)
 cd environment && python test_dynamics.py
 ```
+
+---
+
+## Pipeline d'entraînement
+
+Le module `train.py` fournit un pipeline d'entraînement PPO qui étend `BaseTrain` de la bibliothèque `rl_template`.
+
+### Installation des dépendances
+
+```bash
+uv pip install -r requirements.txt
+```
+
+### Utilisation
+
+```python
+from train import Trainer
+from rl_template.config import PPOConfig, TrainConfig
+
+train_config = TrainConfig(
+    model_name="agri_drone",
+    model_saved_path="saved_models",
+    timestamp=128,
+    batch_size=64,
+    rollout_steps=128,
+)
+
+ppo_config = PPOConfig(
+    lr=3e-4,
+    gamma=0.99,
+    gae_lambda=0.95,
+    clip_eps=0.2,
+)
+
+# Optionnel : configuration wandb
+wandb_config = {
+    "project": "agri-drone-rl",
+    "entity": None,
+    "name": "ppo-training-v1",
+    "config": {"num_plant_groups": 5},
+}
+
+trainer = Trainer(
+    env=env,
+    agent=agent,
+    train_config=train_config,
+    ppo_config=ppo_config,
+    wandb_config=wandb_config,
+)
+
+trainer.train(verbose=True)  # tqdm + wandb
+```
+
+### Fonctionnalités
+
+| Fonctionnalité | Description |
+|---------------|-------------|
+| Actions continues | Gestion correcte des actions 6D (throttle, roll, pitch, yaw, spray, irrigate) |
+| tqdm | Barre de progression pendant l'entraînement |
+| wandb | Logging optionnel des métriques (loss, π, V, H, R, lr) |
+| Sauvegarde | Modèle sauvegardé automatiquement en fin d'entraînement |
+
+### Métriques loggées
+
+- `train/loss` — Loss totale PPO
+- `train/policy_loss` — Loss de politique
+- `train/value_loss` — Loss de valeur
+- `train/entropy` — Entropie de la politique
+- `train/cumulative_reward` — Récompense cumulative de l'épisode
+- `train/learning_rate` — Taux d'apprentissage courant
 
 ---
 

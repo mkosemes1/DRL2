@@ -1,5 +1,60 @@
 # Mise à jour — 17 juillet 2026
 
+## Session 5b — Tests d'intégration Trainer
+
+**Date**: 2026-07-16
+**Fichiers ajoutés**: `environment/tests/test_trainer_integration.py`
+**Tests**: 290 → 323 (+33 tests d'intégration end-to-end)
+
+### Nouveaux tests
+
+| Classe | Tests | Description |
+|--------|-------|-------------|
+| `TestTrainerInstantiation` | 5 | Création, composants, config, shapes, PPO config |
+| `TestFullTrainingLoop` | 5 | Boucle `train()`, fichier modèle, poids, num_updates, reset |
+| `TestLossEvolution` | 3 | Différence de loss, finitude, tendance décroissante |
+| `TestObservationsAndActions` | 5 | Range obs, clipping, shapes, `step()` outputs |
+| `TestModelSaving` | 4 | Fichier, loadable, poids identiques, reproductibilité |
+| `TestBufferAndPPO` | 5 | Fill/clear, cycles multiples, GAE, données réelles |
+| `TestMetrics` | 3 | Cumulative reward, reset, update optimiseur |
+| `TestEdgeCases` | 3 | Single update, batch large, close après training |
+
+---
+
+## Session 5 — Refonte du pipeline d'entraînement
+
+**Date**: 2026-07-16
+**Fichiers modifiés**: `train.py`, `environment/tests/test_training_pipeline.py`
+**Tests**: 279 → 290 (33 tests training pipeline)
+
+### Changements
+
+| # | Changement | Détail |
+|---|-----------|--------|
+| 1 | `Trainer` hérite correctement de `BaseTrain` | Suppression du ré-écriture complète — surcharge minimale |
+| 2 | `rollout_phase()` | Fix `.item()` → `.cpu().numpy()` pour actions 6D |
+| 3 | `update_weights()` | Sommation des log-probs sur dims d'action avant ratio |
+| 4 | `save_model()` | Réutilisé depuis `BaseTrain` (pas de surcharge) |
+| 5 | `tqdm` | Barre de progression pour la boucle d'entraînement |
+| 6 | `wandb` | Logging optionnel des métriques (loss, π, V, H, R, lr) |
+| 7 | `Buffer` | `action_shape=(act_dim,)` pour stocker actions continues |
+| 8 | Tests | 33 tests : inheritance, init, rollout, update, save, train loop, buffer, PPO integration |
+
+### Architecture du pipeline
+
+```
+Trainer(BaseTrain)
+├── __init__()          — crée Buffer(action_shape=(6,)), PPOTrainer
+├── rollout_phase()     — surcharge : fix .item() + log_prob.sum()
+├── update_weights()    — surcharge : PPO avec log_prob sum
+├── save_model()        — réutilise BaseTrain
+├── _init_wandb()       — nouveau : init wandb
+├── _log_wandb()        — nouveau : log métriques
+└── train(verbose)      — nouveau : boucle tqdm + wandb
+```
+
+---
+
 ## Session 4 : Agent PPO et pipeline d'entraînement
 
 ### Implémentation
