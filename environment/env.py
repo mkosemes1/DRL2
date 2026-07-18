@@ -6,7 +6,6 @@ Version avec vol fonctionnel et affichage de la grille de champs.
 """
 
 import os
-import sys
 import numpy as np
 import pybullet as p
 import pybullet_data
@@ -332,6 +331,9 @@ class AgriDroneEnv(BaseEnv):
             "all_watered": all_watered,
             "reward_terms": reward_terms,
         }
+        print(truncated)
+        print(terminated)
+        print(self.step_count)
         return obs, reward, terminated, truncated, info
 
     def _get_cell_under_drone(self):

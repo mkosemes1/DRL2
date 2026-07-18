@@ -28,6 +28,10 @@ uv run python -m pytest environment/tests/test_edge_cases.py -v                 
 # Legacy manual test (not pytest-compatible)
 cd environment && python test_dynamics.py
 
+# Documentation
+uv run python -c "import pathlib; print(pathlib.Path('docs/DOCUMENTATION_DETAILED.md').read_text()[:200])"  # Aperçu doc détaillée
+# Ou ouvrir directement : docs/DOCUMENTATION_DETAILED.md
+
 # Install dependencies
 uv pip install -r requirements.txt
 ```
@@ -73,6 +77,9 @@ DRL2/
 ├── run_train.py              # Script d'entraînement PPO (CLI)
 ├── requirements.txt           # Pinned deps (gymnasium, pybullet, stable-baselines3, torch, wandb)
 ├── specify.md                 # MDP specification (observation space, water task, rewards)
+├── docs/
+│   ├── DOCUMENTATION_DETAILED.md  # Documentation détaillée (1531 lignes) — env, reward, glossaire
+│   └── FORMATION.md               # Guide de formation
 ├── README.md                  # Project documentation (French)
 └── update.md                  # Session changelog
 ```
@@ -200,3 +207,17 @@ cd /home/darrius/project/DRL2 && uv run python -m pytest environment/tests/ -v
 ## Python Version
 
 Python 3.12 (from `.python-version`).
+
+## Documentation
+
+Une documentation détaillée du projet est disponible dans `docs/DOCUMENTATION_DETAILED.md` (1531 lignes). Elle couvre :
+
+- Vue d'ensemble du projet et architecture
+- Détail de l'environnement `AgriDroneEnv` (init, step, reset, obs, render)
+- Physique du drone (`DroneDynamics`, `DroneParams`, `DroneState`)
+- Fonction de récompense (`compute`, `compute_agri`, `compute_water_task`) avec exemples numériques
+- Gestion des obstacles, normalisation, pipeline d'entraînement
+- Diagrammes ASCII art pour les flux de données
+- Glossaire technique (30+ termes)
+
+Le `README.md` (669 lignes) contient également un guide exhaustif incluant les hyperparamètres PPO, la configuration de l'environnement, et un guide pratique pour les ajustements.

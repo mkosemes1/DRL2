@@ -17,3 +17,8 @@ config: {'epochs': 488, 'lr': 3e-05, 'gamma': 0.999, 'gae_lambda': 0.95, 'clip_e
 2026-07-18 18:28:13,466 INFO    MainThread:11726 [wandb_run.py:_redirect():2442] Wrapping output streams.
 2026-07-18 18:28:13,466 INFO    MainThread:11726 [wandb_run.py:_redirect():2465] Redirects installed.
 2026-07-18 18:28:13,468 INFO    MainThread:11726 [wandb_init.py:init():1012] run started, returning control to user process
+2026-07-18 18:36:14,980 INFO    MainThread:11726 [wandb_run.py:_finish():2285] finishing run mohamedtine17-test/drone/l36h7br1
+2026-07-18 18:36:14,980 INFO    MainThread:11726 [wandb_run.py:_atexit_cleanup():2490] got exitcode: 1
+2026-07-18 18:36:14,981 INFO    MainThread:11726 [wandb_run.py:_restore():2472] restore
+2026-07-18 18:36:14,981 INFO    MainThread:11726 [wandb_run.py:_restore():2478] restore done
+2026-07-18 18:36:16,242 INFO    MainThread:11726 [wandb_run.py:_footer_sync_info():3895] logging synced files

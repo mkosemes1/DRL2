@@ -1,5 +1,29 @@
 # Mise à jour — 17 juillet 2026
 
+## Session — Documentation détaillée + README mis à jour
+
+### Changements
+- **docs/DOCUMENTATION_DETAILED.md** : Création d'une documentation détaillée (1531 lignes) couvrant l'environnement dans sa globalité et la fonction de récompense en profondeur
+  - Vue d'ensemble du projet et architecture
+  - Détail de l'environnement AgriDroneEnv (init, step, reset, obs, render)
+  - Physique du drone (DroneDynamics, DroneParams, DroneState)
+  - Fonction de récompense (compute, compute_agri, compute_water_task) avec exemples numériques
+  - Gestion des obstacles, normalisation, pipeline d'entraînement
+  - Diagrammes ASCII art pour les flux de données
+  - Glossaire technique (30+ termes)
+
+- **README.md** : Réécriture complète (311 → 669 lignes)
+  - Architecture du projet mise à jour
+  - Espaces d'observation (39 dims) et d'action (6D) détaillés
+  - Configuration de l'environnement (world, drone, simulation, water_task)
+  - Agent PPO : architecture du réseau, distribution Normale
+  - Pipeline d'entraînement : TrainConfig et PPOConfig avec tableau exhaustif des 9 hyperparamètres
+  - Guide pratique pour changer les hyperparamètres (4 scénarios)
+  - Évaluation, tests, dépendances
+  - Lien vers docs/DOCUMENTATION_DETAILED.md
+
+---
+
 ## Session 5c — Module d'évaluation et rendu rgb_array
 
 **Date**: 2026-07-16

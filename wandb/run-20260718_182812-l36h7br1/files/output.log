@@ -15,4 +15,19 @@ The current PyTorch install supports CUDA capabilities sm_75 sm_80 sm_86 sm_90 s
 If you want to use the NVIDIA GeForce GTX 1050 Ti GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
 
   queued_call()
- 13%|████████████████▍                                                                                                                | 62/488 [02:02<12:37,  1.78s/it]
+ 52%|██████████████████████████████████████████████████████████████████▎                                                             | 253/488 [08:01<07:27,  1.90s/it]
+Traceback (most recent call last):
+  File "/home/darrius/project/DRL2/train.py", line 88, in <module>
+    trainer.rollout_phase(state)
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/train.py", line 66, in rollout_phase
+    action_t, log_prob, _, value = self.agent.get_action(state_tensor)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/agent.py", line 76, in get_action
+    log_prob = dist.log_prob(action)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/distributions/normal.py", line 98, in log_prob
+    -((value - self.loc) ** 2) / (2 * var)
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/utils/_device.py", line 118, in __torch_function__
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+
+KeyboardInterrupt
