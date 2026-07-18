@@ -1,0 +1,39 @@
+{
+  "os": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python": "CPython 3.12.3",
+  "startedAt": "2026-07-18T18:28:12.627150Z",
+  "program": "/home/darrius/project/DRL2/train.py",
+  "codePath": "train.py",
+  "codePathLocal": "train.py",
+  "git": {
+    "remote": "git@github.com:mkosemes1/DRL2.git",
+    "commit": "184d07bd366898676095931c40f5429c8bd78534"
+  },
+  "email": "mohamedtine17@gmail.com",
+  "root": "/home/darrius/project/DRL2",
+  "host": "darrius",
+  "executable": "/home/darrius/project/DRL2/.venv/bin/python3",
+  "cpu_count": 6,
+  "cpu_count_logical": 12,
+  "gpu": "NVIDIA GeForce GTX 1050 Ti",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "1081101176832",
+      "used": "295250825216"
+    }
+  },
+  "memory": {
+    "total": "8251428864"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce GTX 1050 Ti",
+      "memoryTotal": "4294967296",
+      "architecture": "Pascal",
+      "uuid": "GPU-58c636e1-8929-8bfe-167d-0dff97c436bd"
+    }
+  ],
+  "cudaVersion": "13.0",
+  "writerId": "l58gvlzjc54nozh7nj1zzadrpw95g41i"
+}

@@ -1,0 +1,63 @@
+_wandb:
+    value:
+        cli_version: 0.28.0
+        e:
+            wujxfus8qhkku3u672tjm8xg2f85u1o8:
+                codePath: train.py
+                codePathLocal: train.py
+                cpu_count: 6
+                cpu_count_logical: 12
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "1081101176832"
+                        used: "295250571264"
+                email: mohamedtine17@gmail.com
+                executable: /home/darrius/project/DRL2/.venv/bin/python3
+                git:
+                    commit: 184d07bd366898676095931c40f5429c8bd78534
+                    remote: git@github.com:mkosemes1/DRL2.git
+                gpu: NVIDIA GeForce GTX 1050 Ti
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Pascal
+                      memoryTotal: "4294967296"
+                      name: NVIDIA GeForce GTX 1050 Ti
+                      uuid: GPU-58c636e1-8929-8bfe-167d-0dff97c436bd
+                host: darrius
+                memory:
+                    total: "8251428864"
+                os: Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39
+                program: /home/darrius/project/DRL2/train.py
+                python: CPython 3.12.3
+                root: /home/darrius/project/DRL2
+                startedAt: "2026-07-18T18:26:36.597998Z"
+                writerId: wujxfus8qhkku3u672tjm8xg2f85u1o8
+        m: []
+        python_version: 3.12.3
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 2
+                - 16
+            "4": 3.12.3
+            "5": 0.28.0
+            "12": 0.28.0
+            "13": linux-x86_64
+clip_eps:
+    value: 0.1
+ent_coef:
+    value: 0.01
+epochs:
+    value: 488
+gae_lambda:
+    value: 0.95
+gamma:
+    value: 0.999
+lr:
+    value: 3e-05
+value_coef:
+    value: 0.5

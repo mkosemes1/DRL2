@@ -81,10 +81,10 @@ log_config = {
         'ent_coef': ppo_config.ent_coef,
         'value_coef': ppo_config.value_coef,
         }
-state, _ = env.reset()
 
 with wandb.init(project="drone", config=log_config) as run:
-    for step in range(train_config.num_update):
+    for step in tqdm(range(train_config.num_update)):
+        state, _ = env.reset()
         trainer.rollout_phase(state)
         loss, policy_loss, value_loss, entropy_loss = trainer.update_weights(step)
         trainer.save_model()

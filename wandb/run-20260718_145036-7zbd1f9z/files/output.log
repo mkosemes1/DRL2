@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/home/darrius/project/DRL2/train.py", line 89, in <module>
+    loss, policy_loss, value_loss, entropy_loss = trainer.update_weights(step)
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/train.py", line 117, in update_weights
+    loss, policy_loss, value_loss, entropy_loss = self.ppo_trainer.update(
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/algorithms/ppo/ppo.py", line 140, in update
+    logratio = new_log_probs - old_log_probs[idx]
+                               ~~~~~~~~~~~~~^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/utils/_device.py", line 122, in __torch_function__
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+IndexError: index 1920 is out of bounds for dimension 0 with size 1000
