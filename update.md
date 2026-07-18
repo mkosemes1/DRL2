@@ -1,5 +1,34 @@
 # Mise à jour — 17 juillet 2026
 
+## Session 5c — Module d'évaluation et rendu rgb_array
+
+**Date**: 2026-07-16
+**Fichiers modifiés**: `environment/agri_drone_env.py`, `eval_agent.py` (nouveau), `run_train.py` (nouveau)
+**Tests**: 323 tests maintenus (aucune régression)
+
+### Changements
+
+| # | Changement | Détail |
+|---|-----------|--------|
+| 1 | Rendu `rgb_array` | `AgriDroneEnv` supporte `render_mode="rgb_array"` via PyBullet DIRECT headless |
+| 2 | `_init_headless()` | Connexion PyBullet séparée (p.DIRECT) pour capture d'images sans GUI |
+| 3 | `_render_rgb_array()` | Capture 640×480 RGB via `getCameraImage()`, retourne numpy array |
+| 4 | `_render_human()` | Ancien comportement GUI extrait dans sa propre méthode |
+| 5 | `eval_agent.py` | Script d'évaluation : charge modèle, exécute agent, capture frames, génère GIF |
+| 6 | `run_train.py` | Script CLI pour lancer l'entraînement avec arguments (episodes, lr, wandb, etc.) |
+| 7 | `create_gif()` | Utilise PIL pour assembler des frames en GIF animé |
+
+### Architecture du rendu
+
+```
+render()
+├── render_mode="human"     → _render_human()      (fenêtre PyBullet GUI)
+├── render_mode="rgb_array" → _render_rgb_array()   (headless, retourne numpy array)
+└── render_mode=None        → retourne None
+```
+
+---
+
 ## Session 5b — Tests d'intégration Trainer
 
 **Date**: 2026-07-16

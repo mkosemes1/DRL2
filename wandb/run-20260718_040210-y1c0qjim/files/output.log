@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "/home/darrius/project/DRL2/train.py", line 88, in <module>
+    trainer.rollout_phase(state)
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/train.py", line 66, in rollout_phase
+    action_t, log_prob, _, value = self.agent.get_action(state_tensor)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/agent.py", line 65, in get_action
+    dist, value = self.get_distribution(state, **kwargs)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/agent/model.py", line 121, in get_distribution
+    std = torch.exp(self.policy_log_std.expand_as(action))
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1967, in __getattr__
+    raise AttributeError(
+AttributeError: 'Agent' object has no attribute 'policy_log_std'

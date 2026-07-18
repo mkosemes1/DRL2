@@ -8,16 +8,15 @@ Version avec vol fonctionnel et affichage de la grille de champs.
 import os
 import sys
 import numpy as np
-from gymnasium import spaces
-from rl_template.env import BaseEnv
 import pybullet as p
 import pybullet_data
 
-from physics.drone_dynamics import DroneDynamics, DroneParams
-from physics.wind_model import WindModel
-from obstacles import ObstacleManager
-from utils.normalization import normalize
-from reward.reward_function import RewardCalculator, RewardConfig
+from gymnasium import spaces
+from rl_template.env import BaseEnv
+from .physics.drone_dynamics import DroneDynamics, DroneParams
+from .physics.wind_model import WindModel
+from .obstacles import ObstacleManager
+from .reward.reward_function import RewardCalculator, RewardConfig
 
 
 class FieldCell:

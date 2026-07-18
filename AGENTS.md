@@ -11,6 +11,12 @@ Agricultural drone RL environment (Gymnasium API) for training a hexacopter agen
 uv run environment/demo_env.py        # Full agri environment with field grid
 uv run environment/minimal_fly_env.py  # Minimal fly-only env (no agri logic)
 
+# Training and evaluation
+uv run python run_train.py                             # Entraînement PPO
+uv run python run_train.py --episodes 50 --wandb       # Entraînement avec wandb
+uv run python eval_agent.py                            # Évaluation + GIF
+uv run python eval_agent.py --model saved_models/agri_drone_ppo.pt --output demo.gif
+
 # Tests (323 pytest-compatible tests)
 uv run python -m pytest environment/tests/ -v                                   # All tests
 uv run python -m pytest environment/tests/test_reward_function.py -v            # Reward tests
@@ -63,6 +69,8 @@ DRL2/
 ├── agent/
 │   └── model.py               # Agent PPO (BaseAgent) — acteur-critique MLP
 ├── train.py                   # Trainer PPO (BaseTrain) — pipeline d'entraînement avec tqdm/wandb
+├── eval_agent.py             # Évaluation agent sauvegardé + génération GIF
+├── run_train.py              # Script d'entraînement PPO (CLI)
 ├── requirements.txt           # Pinned deps (gymnasium, pybullet, stable-baselines3, torch, wandb)
 ├── specify.md                 # MDP specification (observation space, water task, rewards)
 ├── README.md                  # Project documentation (French)
@@ -125,6 +133,8 @@ The observation space has `17 + 3 + 1 + N*4` dimensions (default N=5 → 39 dims
 
 7. **Use `uv run`** for all Python commands — the project uses a `.venv` with Python 3.12 managed by `uv`. Direct `python` calls may use system Python and miss dependencies.
 
+8. **rgb_array rendering** — `AgriDroneEnv` supports `render_mode="rgb_array"` for headless frame capture via PyBullet `p.DIRECT`. The headless client is a **separate** PyBullet physics client from the GUI client. All PyBullet API calls in `_render_rgb_array` use `physicsClientId=self._client` to avoid conflicts. Frames are captured at 640×480 via `getCameraImage()`.
+
 ## Training Pipeline (Session 5)
 
 `Trainer` in `train.py` properly extends `BaseTrain` from `rl_template`:
@@ -150,6 +160,23 @@ Key constants:
 - `batch_size`: Mini-batch size (default 64)
 - `ppo_config`: lr, gamma, gae_lambda, clip_eps
 - `wandb_config`: Optional dict with project, entity, name, config
+
+## Évaluation
+
+Le script `eval_agent.py` charge un modèle sauvegardé et génère un GIF de l'agent en action.
+
+```bash
+uv run python eval_agent.py                                    # Dernier modèle
+uv run python eval_agent.py --model saved_models/agent.pt     # Modèle spécifique
+uv run python eval_agent.py --episodes 3 --fps 20             # Plusieurs épisodes
+```
+
+Modes de rendu :
+- `render_mode="rgb_array"` : capture headless via PyBullet DIRECT (pour GIF/video)
+- `render_mode="human"` : fenêtre PyBullet GUI temps réel
+- `render_mode=None` : pas de rendu (entraînement)
+
+Le GIF est créé avec PIL (pillow) à partir des frames RGB capturées.
 
 ## Agent Workflow
 

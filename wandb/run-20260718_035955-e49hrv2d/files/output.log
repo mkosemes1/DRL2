@@ -1,0 +1,51 @@
+/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py:422: UserWarning: Found GPU0 NVIDIA GeForce GTX 1050 Ti which is of compute capability (CC) 6.1.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 7.5 which supports hardware CC >=7.5,<8.0
+- 8.0 which supports hardware CC >=8.0,<9.0 except {8.7}
+- 8.6 which supports hardware CC >=8.6,<9.0 except {8.7}
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 12.0 which supports hardware CC >=12.0,<13.0
+Your installed torch==2.13.0+cu130 does not include kernels for this GPU. Reinstall the same version against a CUDA build that does, e.g.:
+  For CUDA 12.6 use pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu126
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py:540: UserWarning:
+NVIDIA GeForce GTX 1050 Ti with CUDA capability sm_61 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities sm_75 sm_80 sm_86 sm_90 sm_100 sm_120.
+If you want to use the NVIDIA GeForce GTX 1050 Ti GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+
+  queued_call()
+Traceback (most recent call last):
+  File "/home/darrius/project/DRL2/train.py", line 86, in <module>
+    trainer.rollout_phase(state)
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/train.py", line 66, in rollout_phase
+    action_t, log_prob, _, value = self.agent.get_action(state_tensor)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/agent.py", line 65, in get_action
+    dist, value = self.get_distribution(state, **kwargs)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/agent/model.py", line 119, in get_distribution
+    action, value = self.forward(state)
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/agent/model.py", line 99, in forward
+    features = self.shared(state)
+               ^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Expected all tensors to be on the same device, but got mat1 is on cuda:0, different from other tensors on cpu (when checking argument in method wrapper_CUDA_addmm)

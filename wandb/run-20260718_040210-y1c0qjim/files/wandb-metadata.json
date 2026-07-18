@@ -1,0 +1,17 @@
+{
+  "os": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python": "CPython 3.12.3",
+  "startedAt": "2026-07-18T04:02:10.907354Z",
+  "program": "/home/darrius/project/DRL2/train.py",
+  "codePath": "train.py",
+  "codePathLocal": "train.py",
+  "git": {
+    "remote": "git@github.com:mkosemes1/DRL2.git",
+    "commit": "335c0345fc21608f215dbfd5ee31d2fb5475a9a2"
+  },
+  "email": "mohamedtine17@gmail.com",
+  "root": "/home/darrius/project/DRL2",
+  "host": "darrius",
+  "executable": "/home/darrius/project/DRL2/.venv/bin/python3",
+  "writerId": "qcxchdnal2m9v7jjsouoxx2ikr840s7n"
+}

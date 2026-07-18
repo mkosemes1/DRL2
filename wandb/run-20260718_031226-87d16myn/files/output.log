@@ -1,0 +1,34 @@
+Traceback (most recent call last):
+  File "/home/darrius/project/DRL2/train.py", line 86, in <module>
+    trainer.rollout_phase(state)
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/train.py", line 65, in rollout_phase
+    action_t, log_prob, _, value = self.agent.get_action(state)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/agent.py", line 65, in get_action
+    dist, value = self.get_distribution(state)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/agent/model.py", line 119, in get_distribution
+    action, value = self.forward(state)
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/agent/model.py", line 99, in forward
+    features = self.shared(state)
+               ^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: linear(): argument 'input' (position 1) must be Tensor, not numpy.ndarray

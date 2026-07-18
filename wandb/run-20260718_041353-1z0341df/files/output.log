@@ -1,0 +1,13 @@
+TypeError: only 0-dimensional arrays can be converted to Python scalars
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/darrius/project/DRL2/train.py", line 88, in <module>
+    trainer.rollout_phase(state)
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/train.py", line 73, in rollout_phase
+    self.buffer.insert(
+  File "/home/darrius/project/DRL2/.venv/lib/python3.12/site-packages/rl_template/common.py", line 88, in insert
+    self.old_log_probs[self.slice] = old_log_prob
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+ValueError: setting an array element with a sequence.

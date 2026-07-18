@@ -178,6 +178,18 @@ cd environment && python minimal_fly_env.py
 cd environment && python test_dynamics.py
 ```
 
+### Entraînement
+
+```bash
+# Entraînement PPO (100 updates par défaut)
+uv run python run_train.py
+
+# Avec options
+uv run python run_train.py --episodes 200 --lr 3e-4 --wandb
+```
+
+Voir `docs/FORMATION.md` pour le guide complet d'entraînement.
+
 ---
 
 ## Pipeline d'entraînement
@@ -250,6 +262,32 @@ trainer.train(verbose=True)  # tqdm + wandb
 
 ---
 
+## Évaluation
+
+Le script `eval_agent.py` charge un modèle sauvegardé et génère un GIF de l'agent en action.
+
+```bash
+# Évaluer le dernier modèle
+uv run python eval_agent.py
+
+# Spécifier un modèle
+uv run python eval_agent.py --model saved_models/agri_drone_ppo.pt --output demo.gif
+
+# Plusieurs épisodes, plus fluide
+uv run python eval_agent.py --episodes 3 --frameskip 2 --fps 20
+```
+
+| Argument | Défaut | Description |
+|----------|--------|-------------|
+| `--model` | dernier modèle | Chemin vers le fichier .pt |
+| `--episodes` | 1 | Nombre d'épisodes |
+| `--max-steps` | 500 | Max pas par épisode |
+| `--frameskip` | 2 | Capturer 1 image tous les N pas |
+| `--fps` | 15 | Images par seconde du GIF |
+| `--output` | eval_output.gif | Nom du fichier de sortie |
+
+---
+
 ## Dépendances principales
 
 | Package | Version | Usage |
@@ -260,6 +298,7 @@ trainer.train(verbose=True)  # tqdm + wandb
 | `stable-baselines3` | ≥ 2.0 | Algorithmes RL (PPO, SAC, etc.) |
 | `torch` | ≥ 2.0 | Réseaux de neurones |
 | `wandb` | ≥ 0.15 | Suivi des expériences |
+| `pillow` | ≥ 10.0 | Création de GIFs pour l'évaluation |
 
 ---
 

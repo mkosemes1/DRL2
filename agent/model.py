@@ -40,20 +40,28 @@ class Agent(BaseAgent):
 
         # --- Réseau partagé (feature extractor) ---
         self.shared = nn.Sequential(
-            nn.Linear(n_state, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
+            nn.Linear(n_state, 128),
+            nn.Tanh(),
+            nn.Linear(128, 64),
+            nn.Tanh(),
         )
 
         # --- Tête acteur (politique) ---
         # Produit la moyenne de la distribution pour chaque dimension d'action
-        self.policy_mean = nn.Linear(64, n_action)
-        # Log écart-type appris (paramètre non liée à la couche précédente)
+        self.actor = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, n_action)
+                ) 
+
         self.policy_log_std = nn.Parameter(torch.zeros(n_action))
 
         # --- Tête critique (valeur) ---
-        self.value_head = nn.Linear(64, 1)
+        self.value_head = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+                )
 
         # Initialisation des poids
         self._init_weights()
@@ -71,12 +79,10 @@ class Agent(BaseAgent):
                 nn.init.constant_(module.bias, 0.0)
 
         # Initialisation de la tête acteur avec gain faible
-        nn.init.orthogonal_(self.policy_mean.weight, gain=0.01)
-        nn.init.constant_(self.policy_mean.bias, 0.0)
-
-        # Initialisation de la tête critique
-        nn.init.orthogonal_(self.value_head.weight, gain=1.0)
-        nn.init.constant_(self.value_head.bias, 0.0)
+        for layer in self.actor:
+            if isinstance(layer, nn.Linear):
+                nn.init.orthogonal_(layer.weight, gain=np.sqrt(2))
+                nn.init.constant_(layer.bias, 0.0)
 
     def forward(self, state):
         """Passe avant : calcule les logits de politique et la valeur.
@@ -93,10 +99,8 @@ class Agent(BaseAgent):
               - ``policy_logits`` est de forme ``(batch_size, n_action)``
               - ``value`` est de forme ``(batch_size, 1)``
         """
-        if isinstance(state, np.ndarray):
-            state = torch.tensor(state, dtype=torch.float32)
         features = self.shared(state)
-        policy_logits = self.policy_mean(features)
+        policy_logits = self.actor(features)
         value = self.value_head(features)
         return policy_logits, value
 
@@ -115,12 +119,8 @@ class Agent(BaseAgent):
             instance ``torch.distributions.Normal`` paramétrée par le
             réseau, et ``value`` l'estimation de la valeur de l'état.
         """
-        if isinstance(state, np.ndarray):
-            state = torch.tensor(state, dtype=torch.float32)
-        features = self.shared(state)
-        mean = self.policy_mean(features)
+        action, value = self.forward(state)
         # Exponentielle pour garantir un écart-type positif
-        std = torch.exp(self.policy_log_std.expand_as(mean))
-        dist = Normal(mean, std)
-        value = self.value_head(features)
+        std = torch.exp(self.policy_log_std.expand_as(action))
+        dist = Normal(action, std)
         return dist, value
