@@ -15,4 +15,4 @@ The current PyTorch install supports CUDA capabilities sm_75 sm_80 sm_86 sm_90 s
 If you want to use the NVIDIA GeForce GTX 1050 Ti GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
 
   queued_call()
- 10%|█████████████▏                                                                                                                   | 50/488 [01:38<13:08,  1.80s/it]
+ 13%|████████████████▍                                                                                                                | 62/488 [02:02<12:37,  1.78s/it]

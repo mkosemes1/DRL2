@@ -18,3 +18,6 @@
 {"time":"2026-07-18T18:29:38.261562713Z","level":"INFO","msg":"filestream: sending request","total_files":4,"history_offset":34,"history_lines":8,"events_offset":8,"events_lines":2,"console_offset":17,"console_lines":1}
 {"time":"2026-07-18T18:29:38.584875313Z","level":"INFO","msg":"filestream: request sent","status":"200 OK"}
 {"time":"2026-07-18T18:29:53.261093914Z","level":"INFO","msg":"filestream: sending request","total_files":4,"history_offset":42,"history_lines":8,"events_offset":10,"events_lines":2,"console_offset":17,"console_lines":1}
+{"time":"2026-07-18T18:29:53.620349809Z","level":"INFO","msg":"filestream: request sent","status":"200 OK"}
+{"time":"2026-07-18T18:30:11.433490582Z","level":"INFO","msg":"filestream: sending request","total_files":4,"history_offset":50,"history_lines":9,"events_offset":12,"events_lines":2,"console_offset":17,"console_lines":1}
+{"time":"2026-07-18T18:30:11.77501271Z","level":"INFO","msg":"filestream: request sent","status":"200 OK"}
