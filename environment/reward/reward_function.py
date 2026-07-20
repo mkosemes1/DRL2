@@ -50,7 +50,7 @@ class RewardConfig:
     smooth_weight: float = 0.1
     energy_alpha: float = 0.05
     stability_weight: float = 0.3
-    time_penalty: float = 0.01
+    time_penalty: float = 0.05
     collision_penalty: float = 300.0
     out_of_bounds_penalty: float = 200.0
     flip_penalty: float = 250.0
@@ -66,8 +66,8 @@ class RewardConfig:
     watering_reward: float = 5.0           # récompense quand un groupe de plantes est arrosé
     refill_reward: float = 1.0             # récompense quand le réservoir est rempli
     refill_threshold: float = 98.0         # seuil pour considérer un remplissage
-    time_penalty_per_group: float = 0.02   # pénalité temporelle par groupe non arrosé
-    distance_shaping_reward: float = 0.05  # récompense pour se rapprocher d'un groupe
+    time_penalty_per_group: float = 0.0   # pénalité temporelle par groupe non arrosé
+    distance_shaping_reward: float = 0.5  # récompense pour se rapprocher d'un groupe
     mission_complete_reward: float = 100.0  # bonus quand tous les groupes sont arrosés
 
 
@@ -321,13 +321,13 @@ class RewardCalculator:
         terms["watering"] = c.watering_reward if just_watered else 0.0
 
         # Récompense de remplissage
-        terms["refill"] = c.refill_reward if just_refilled else 0.0
+        terms["refill"] = 0.0
 
         # Pénalité temporelle proportionnelle au nombre de groupes non arrosés
-        terms["time_penalty"] = -c.time_penalty_per_group * num_unwatered
+        terms["time_penalty"] = -c.time_penalty
 
         # Shaping de distance : récompense pour se rapprocher du groupe le plus proche
-        terms["distance_shaping"] = 0.0
+        terms["distance_shaping"] = c.distance_shaping_reward * (prev_dist - curr_dist)
         if num_unwatered > 0 and prev_dist < float("inf") and curr_dist < float("inf"):
             if curr_dist < prev_dist:
                 terms["distance_shaping"] = c.distance_shaping_reward

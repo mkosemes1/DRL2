@@ -12,7 +12,7 @@ import pybullet_data
 
 from gymnasium import spaces
 from rl_template.env import BaseEnv
-from .physics.drone_dynamics import DroneDynamics, DroneParams
+from .physics.drone_dynamics import DroneWrapper
 from .physics.wind_model import WindModel
 from .obstacles import ObstacleManager
 from .reward.reward_function import RewardCalculator, RewardConfig
@@ -44,34 +44,27 @@ class AgriDroneEnv(BaseEnv):
     metadata = {"render_modes": ["human", "rgb_array", None]}
 
     def __init__(self, config: dict, render_mode: str | None = None):
-        """Initialise l'environnement agricole pour drone hexacoptère.
-
-        Configure le monde physique, les paramètres du drone, la grille
-        du champ agricole, les espaces Gymnasium et la tâche d'irrigation
-        (water task) avec groupes de plantes et réservoir d'eau.
-
-        L'espace d'observation est composé de :
-            17 dims (état du drone) + 3 dims (bassine) + 1 dim (réservoir)
-            + N*4 dims (groupes de plantes) = 17 + 3 + 1 + N*4 dimensions.
-
-        L'espace d'action est de 6 dimensions continues :
-            4 commandes de vol + 1 pulvérisation + 1 irrigation.
-
-        Args:
-            config: Dictionnaire de configuration contenant les clés
-                ``world``, ``drone``, ``simulation``, ``normalization``
-                et ``water_task``.
-            render_mode: Mode de rendu PyBullet (``"human"``, ``"rgb_array"``)
-                ou ``None`` pour désactiver le rendu.
-
-        Raises:
-            KeyError: Si les clés obligatoires de ``config`` sont absentes.
-        """
         super().__init__()
         self.config = config
         self.render_mode = render_mode
+        
+        # --- 1. DÉMARRAGE IMMÉDIAT DE PYBULLET ---
+        if self.render_mode == "human":
+            self._client = p.connect(p.GUI)
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+        else:
+            self._client = p.connect(p.DIRECT)
+            
+        p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=self._client)
+        p.setGravity(0, 0, -9.81, physicsClientId=self._client)
 
-        # Paramètres du monde
+        p.loadURDF("plane.urdf", physicsClientId=self._client)
+
+        drone_cfg = config["drone"]
+        urdf_path = drone_cfg.get("urdf_path", os.path.join(os.path.dirname(__file__), "agri_hexacopter_pro.urdf"))
+        
+
+                # --- 2. PARAMÈTRES DU MONDE & DRONE ---
         world_cfg = config["world"]
         self.world_bounds = {
             "x": (-world_cfg["size_x"]/2, world_cfg["size_x"]/2),
@@ -79,30 +72,18 @@ class AgriDroneEnv(BaseEnv):
             "z": (world_cfg["ground_z"], world_cfg["size_z"]),
         }
         self.field_size = (world_cfg.get("field_cells_x", 20), world_cfg.get("field_cells_y", 20))
-
-        # Grille du champ (initialisée plus tard)
         self.field_grid = None
         self.total_cells = self.field_size[0] * self.field_size[1]
+        self._field_created = False
+        self._cell_ids = []
 
-        # Paramètres du drone
-        drone_cfg = config["drone"]
-        params = DroneParams(
-            dry_mass=drone_cfg.get("dry_mass", 10.0),
-            payload_mass=drone_cfg.get("payload_mass_full", 5.0),
-            gravity=drone_cfg.get("gravity", 9.81),
-            max_thrust_total=drone_cfg.get("max_thrust_total", 350.0),
-            drag_coefficient=drone_cfg.get("drag_coefficient", 0.08),
-            max_tilt_angle_rad=drone_cfg.get("max_tilt_angle_rad", 0.5236),
-            max_angular_rate=drone_cfg.get("max_angular_rate", 3.0),
-            attitude_time_constant=drone_cfg.get("attitude_time_constant", 0.08),
-            max_velocity=config["normalization"].get("max_velocity", 50.0),
-        )
         self.dt = config["simulation"].get("dt", 0.02)
         self.max_steps = config["simulation"].get("max_episode_steps", 1000)
-        self.dynamics = DroneDynamics(params, self.world_bounds, self.dt)
+        self.dynamics = DroneWrapper(urdf_path, client_id=self._client)
+        self._drone_id = self.dynamics.drone_id
 
         # Désactiver les fonctionnalités agricoles (sauf affichage)
-        self.wind = WindModel(enabled=False)
+        self.wind = WindModel(enabled=True)
         self.obstacle_manager = ObstacleManager(self.world_bounds, min_radius=1.0, max_radius=3.0)
         self.obstacle_manager.obstacles = []
 
@@ -118,7 +99,7 @@ class AgriDroneEnv(BaseEnv):
 
         # --- Espaces Gymnasium ---
         # 17 dims d'origine + 3 (basin) + 1 (tank) + N*4 (plant groups)
-        obs_dim = 17 + 3 + 1 + self.num_plant_groups * 4
+        obs_dim = 18 + 3 + 1 + self.num_plant_groups * 4
         self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,), dtype=np.float32)
 
@@ -141,8 +122,6 @@ class AgriDroneEnv(BaseEnv):
         self.reward_calc = RewardCalculator(RewardConfig())
 
         # Rendu PyBullet (lazy)
-        self._client = None
-        self._drone_id = None
         self._prop_joints = []
         self._prop_angle = 0.0
         self._urdf_path = drone_cfg.get("urdf_path", os.path.join(os.path.dirname(__file__), "agri_hexacopter_pro.urdf"))
@@ -151,27 +130,6 @@ class AgriDroneEnv(BaseEnv):
         self._cell_ids = []  # pour stocker les IDs des cubes
 
     def reset(self, seed=None):
-        """Réinitialise l'environnement pour un nouvel épisode.
-
-        Effectue les opérations suivantes :
-            - Remet à zéro le compteur de pas, la batterie, les niveaux
-              de pesticide et d'eau, et l'état de retour à la base.
-            - Réinitialise la position et la vitesse du drone à l'origine.
-            - Génère aléatoirement l'état des cellules du champ (maladies,
-              zones sèches) lors du premier appel.
-            - Réinitialise les flags de visite, pulvérisation et arrosage
-              de toutes les cellules.
-            - Positionne aléatoirement les ``num_plant_groups`` groupes
-              de plantes dans la carte et remplit le réservoir d'eau à 100.
-
-        Args:
-            seed: Graine aléatoire pour la reproductibilité.
-
-        Returns:
-            Tuple ``(observation, info)`` où ``observation`` est le vecteur
-            d'observation normalisé et ``info`` contient les métadonnées
-            de l'épisode (position de l'objectif).
-        """
         super().reset(seed=seed)
         self.step_count = 0
         self.battery_level = 1e6
@@ -180,8 +138,12 @@ class AgriDroneEnv(BaseEnv):
         self.maladies_traitees = 0
         self.sec_arrosees = 0
         self.returning_home = False
-        self.dynamics.reset(np.array([0.0, 0.0, 1.0]))
-        self.goal_position = np.array([20.0, 20.0, 2.0])
+        self.goal_position = np.array([0.0, 0.0, 1.0])
+
+        start_pos = [0.0, 0.0, 1.0]
+        start_ori = p.getQuaternionFromEuler([0, 0, 0])
+        p.resetBasePositionAndOrientation(self._drone_id, start_pos, start_ori, physicsClientId=self._client)
+        p.resetBaseVelocity(self._drone_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0], physicsClientId=self._client)
 
         # Initialiser la grille du champ avec des cellules aléatoires (pour l'affichage)
         if self.field_grid is None:
@@ -223,8 +185,11 @@ class AgriDroneEnv(BaseEnv):
             ]
         self.water_tank_level = 100.0
 
+        self.wind.reset()
         obs = self._get_obs()
         info = {"goal_position": self.goal_position.tolist()}
+        if self.render_mode == "human":
+            self.render()
         return obs, info
 
     def step(self, action):
@@ -252,14 +217,27 @@ class AgriDroneEnv(BaseEnv):
             l'interface Gymnasium. ``info`` contient les métriques
             détaillées (niveau réservoir, groupes restants, etc.).
         """
-        action = np.asarray(action, dtype=np.float32)
-        action = np.clip(action, -1.0, 1.0)
+        action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
         flight_action = action[:4]
 
         # --- Tracer la distance avant le pas de physique ---
         prev_dist = self._distance_to_nearest_unwatered()
 
-        state = self.dynamics.step(flight_action)
+        self.dynamics.apply_action(flight_action)
+
+        current_wind = self.wind.step()
+        if self.wind.enabled:
+            wind_force = [current_wind[0], current_wind[1], 0.0]
+            p.applyExternalForce(
+                self._drone_id, 
+                -1, 
+                forceObj=wind_force, 
+                posObj=[0, 0, 0], 
+                flags=p.WORLD_FRAME, 
+                physicsClientId=self._client
+            )
+
+        p.stepSimulation(physicsClientId=self._client)
 
         # Mettre à jour la cellule sous le drone (pour le visuel)
         cell = self._get_cell_under_drone()
@@ -284,7 +262,7 @@ class AgriDroneEnv(BaseEnv):
 
         # --- Gestion du remplissage du réservoir à la bassine ---
         just_refilled = False
-        drone_pos = self.dynamics.state.position()
+        drone_pos = self._get_drone_pos()
         dist_to_basin = np.linalg.norm(drone_pos - self.water_basin_position)
         if dist_to_basin < self.basin_refill_radius:
             if self.water_tank_level < 98.0:
@@ -316,7 +294,7 @@ class AgriDroneEnv(BaseEnv):
 
         obs = self._get_obs()
         info = {
-            "distance_to_goal": np.linalg.norm(state.position() - self.goal_position),
+            "distance_to_goal": np.linalg.norm(self._get_drone_pos() - self.goal_position),
             "battery_level": self.battery_level,
             "pesticide_level": self.pesticide_level,
             "water_level": self.water_level,
@@ -331,9 +309,9 @@ class AgriDroneEnv(BaseEnv):
             "all_watered": all_watered,
             "reward_terms": reward_terms,
         }
-        print(truncated)
-        print(terminated)
-        print(self.step_count)
+
+        if self.render_mode == "human":
+            self.render()
         return obs, reward, terminated, truncated, info
 
     def _get_cell_under_drone(self):
@@ -346,7 +324,7 @@ class AgriDroneEnv(BaseEnv):
         Returns:
             L'instance ``FieldCell`` sous le drone, ou ``None`` si hors limites.
         """
-        pos = self.dynamics.state.position()
+        pos = self._get_drone_pos()
         x, y = pos[0], pos[1]
         x_min, x_max = self.world_bounds["x"]
         y_min, y_max = self.world_bounds["y"]
@@ -370,7 +348,7 @@ class AgriDroneEnv(BaseEnv):
             Distance minimale en mètres (float). Retourne 0.0 si tous
             les groupes sont déjà arrosés.
         """
-        drone_pos = self.dynamics.state.position()
+        drone_pos = self._get_drone_pos()
         min_dist = float("inf")
         for k in range(self.num_plant_groups):
             if self.plant_groups[k, 3] < 0.5:  # non arrosé
@@ -392,7 +370,7 @@ class AgriDroneEnv(BaseEnv):
             le plus proche (entier >= 0), ou -1 si tous les groupes sont
             déjà arrosés. ``distance`` est la distance en mètres.
         """
-        drone_pos = self.dynamics.state.position()
+        drone_pos = self._get_drone_pos()
         min_dist = float("inf")
         min_idx = -1
         for k in range(self.num_plant_groups):
@@ -404,79 +382,55 @@ class AgriDroneEnv(BaseEnv):
                     min_idx = k
         return min_idx, min_dist
 
+    def _get_drone_pos(self):
+        pos, _, _, _ = self.dynamics.get_raw_state()
+        return pos
+
     def _get_obs(self):
-        """Construit le vecteur d'observation normalisé.
+        pos, lin_vel, ang_vel, (roll, pitch, yaw) = self.dynamics.get_raw_state()
+        drone_position = np.array(pos, dtype=np.float32)
 
-        La disposition complète du vecteur est la suivante :
-
-        - **Dimensions 0–16** : État du drone (17 dims)
-            0–2   : Position (x, y, z)
-            3–5   : Vitesse linéaire (vx, vy, vz)
-            6–8   : Attitude (roll, pitch, yaw)
-            9–11  : Vitesses angulaires (roll_rate, pitch_rate, yaw_rate)
-            12    : Distance à l'objectif
-            13    : Erreur de cap (heading error)
-            14    : Niveau de batterie
-            15    : Distance à l'obstacle le plus proche (toujours 0 ici)
-            16    : Intensité du vent (toujours 0 ici)
-
-        - **Dimensions 17–19** : Coordonnées de la bassine d'eau (x, y, z)
-        - **Dimension 20** : Niveau du réservoir d'eau (0–100)
-        - **Dimensions 21 à 20+N*4** : Matrice des groupes de plantes
-            aplatie, chaque groupe contenant (x, y, z, is_watered).
-
-        Toutes les valeurs continues sont normalisées dans ``[-1, 1]``.
-        Le booléen ``is_watered`` est transformé de 0.0/1.0 vers -1.0/+1.0.
-
-        Returns:
-            Tableau numpy de forme ``(obs_dim,)`` et dtype ``float32``.
-        """
-        s = self.dynamics.state
         max_v = self.config["normalization"].get("max_velocity", 50.0)
         max_d = self.config["normalization"].get("max_distance", 100.0)
         xb, yb, zb = self.world_bounds["x"], self.world_bounds["y"], self.world_bounds["z"]
 
         def safe_norm(x, min_val, max_val):
-            """Normalise x dans [-1, 1] en évitant la division par zéro."""
             if max_val - min_val == 0:
                 return 0.0
             return 2.0 * (x - min_val) / (max_val - min_val) - 1.0
 
         obs_list = [
-            # --- 17 dims d'origine (état du drone) ---
-            safe_norm(s.x, xb[0], xb[1]),
-            safe_norm(s.y, yb[0], yb[1]),
-            safe_norm(s.z, zb[0], zb[1]),
-            safe_norm(s.vx, -max_v, max_v),
-            safe_norm(s.vy, -max_v, max_v),
-            safe_norm(s.vz, -max_v, max_v),
-            safe_norm(s.roll, -np.pi, np.pi),
-            safe_norm(s.pitch, -np.pi, np.pi),
-            safe_norm(s.yaw, -np.pi, np.pi),
-            safe_norm(s.roll_rate, -3.0, 3.0),
-            safe_norm(s.pitch_rate, -3.0, 3.0),
-            safe_norm(s.yaw_rate, -3.0, 3.0),
-            safe_norm(np.linalg.norm(s.position() - self.goal_position), 0, max_d),
-            safe_norm(0.0, 0, np.pi),
+            # État du drone (17 dims dans ton ancien code, 18 maintenant avec sin/cos)
+            safe_norm(pos[0], xb[0], xb[1]),
+            safe_norm(pos[1], yb[0], yb[1]),
+            safe_norm(pos[2], zb[0], zb[1]),
+            safe_norm(lin_vel[0], -max_v, max_v),
+            safe_norm(lin_vel[1], -max_v, max_v),
+            safe_norm(lin_vel[2], -max_v, max_v),
+            safe_norm(roll, -np.pi, np.pi),
+            safe_norm(pitch, -np.pi, np.pi),
+            np.cos(yaw), # Remplacement de safe_norm(yaw...)
+            np.sin(yaw), # pour la continuité RL
+            safe_norm(ang_vel[0], -3.0, 3.0),
+            safe_norm(ang_vel[1], -3.0, 3.0),
+            safe_norm(ang_vel[2], -3.0, 3.0),
+            safe_norm(np.linalg.norm(drone_position - self.goal_position), 0, max_d),
+            safe_norm(0.0, 0, np.pi), # Heading error si besoin
             safe_norm(self.battery_level, 0, 1e6),
-            safe_norm(0.0, 0, max_d),
-            safe_norm(0.0, 0, 1.0),
+            safe_norm(0.0, 0, max_d), # Distance obstacle
+            safe_norm(self.wind.magnitude(), 0.0, self.wind.max_speed)
         ]
 
-        # --- Coordonnées de la bassine d'eau (3 dims) ---
         obs_list.append(safe_norm(self.water_basin_position[0], xb[0], xb[1]))
         obs_list.append(safe_norm(self.water_basin_position[1], yb[0], yb[1]))
         obs_list.append(safe_norm(self.water_basin_position[2], zb[0], zb[1]))
-
-        # --- Niveau du réservoir d'eau (1 dim) ---
         obs_list.append(safe_norm(self.water_tank_level, 0.0, 100.0))
 
-        # --- Matrice des groupes de plantes aplatie (N*4 dims) ---
         for k in range(self.num_plant_groups):
             obs_list.append(safe_norm(self.plant_groups[k, 0], xb[0], xb[1]))
             obs_list.append(safe_norm(self.plant_groups[k, 1], yb[0], yb[1]))
             obs_list.append(safe_norm(self.plant_groups[k, 2], zb[0], zb[1]))
-            obs_list.append(2.0 * self.plant_groups[k, 3] - 1.0)  # normaliser 0/1 vers -1/+1
+            obs_list.append(2.0 * self.plant_groups[k, 3] - 1.0) 
 
         obs = np.array(obs_list, dtype=np.float32)
         return obs
@@ -505,46 +459,6 @@ class AgriDroneEnv(BaseEnv):
 
         return None
 
-    def _init_headless(self):
-        """Initialise PyBullet en mode DIRECT (sans GUI) pour le rendu headless.
-
-        Crée une connexion PyBullet sans fenêtre, charge le modèle URDF
-        du drone (ou une sphère de secours), le sol, et configure la
-        caméra pour la capture d'images.
-        """
-        if self._headless_initialized:
-            return
-
-        self._client = p.connect(p.DIRECT)
-        p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=self._client)
-        p.resetDebugVisualizerCamera(
-            cameraDistance=15, cameraYaw=45, cameraPitch=-30,
-            cameraTargetPosition=[0, 0, 2], physicsClientId=self._client,
-        )
-
-        # Sol
-        p.loadURDF("plane.urdf", physicsClientId=self._client)
-
-        # Drone
-        try:
-            self._drone_id = p.loadURDF(
-                self._urdf_path, basePosition=[0, 0, 1],
-                physicsClientId=self._client,
-            )
-        except Exception:
-            self._drone_id = p.loadURDF(
-                "sphere_small.urdf", basePosition=[0, 0, 1],
-                physicsClientId=self._client,
-            )
-
-        # Récupérer les joints des hélices
-        self._prop_joints = []
-        for i in range(p.getNumJoints(self._drone_id, physicsClientId=self._client)):
-            info = p.getJointInfo(self._drone_id, i, physicsClientId=self._client)
-            if info[1].decode("utf-8").startswith("j_p"):
-                self._prop_joints.append(i)
-
-        self._headless_initialized = True
 
     def _render_rgb_array(self):
         """Capture une image RGB de la scène en mode headless.
@@ -567,16 +481,7 @@ class AgriDroneEnv(BaseEnv):
         # Mettre à jour les couleurs du champ
         if self._field_created and self.field_grid is not None:
             self._update_field_colors()
-
-        # Mettre à jour la position du drone
-        state = self.dynamics.state
-        pos = [state.x, state.y, state.z]
-        ori = p.getQuaternionFromEuler([state.roll, state.pitch, state.yaw])
-        p.resetBasePositionAndOrientation(
-            self._drone_id, pos, ori, physicsClientId=self._client,
-        )
-
-        # Hélices
+        
         self._prop_angle += 20.0
         for j in self._prop_joints:
             p.resetJointState(
@@ -623,12 +528,11 @@ class AgriDroneEnv(BaseEnv):
                 cameraDistance=12, cameraYaw=45, cameraPitch=-35,
                 cameraTargetPosition=[0, 0, 2],
             )
-            p.loadURDF("plane.urdf")
             try:
                 self._drone_id = p.loadURDF(self._urdf_path, basePosition=[0, 0, 1])
             except Exception:
                 self._drone_id = p.loadURDF("sphere_small.urdf", basePosition=[0, 0, 1])
-                print("⚠️ URDF drone non trouvé, sphère utilisée.")
+                print("URDF drone non trouvé, sphère utilisée.")
             # Récupérer les joints des hélices
             self._prop_joints = []
             for i in range(p.getNumJoints(self._drone_id)):
@@ -644,12 +548,6 @@ class AgriDroneEnv(BaseEnv):
         # Mettre à jour les couleurs du champ
         if self._field_created and self.field_grid is not None:
             self._update_field_colors()
-
-        # Mettre à jour la position du drone
-        state = self.dynamics.state
-        pos = [state.x, state.y, state.z]
-        ori = p.getQuaternionFromEuler([state.roll, state.pitch, state.yaw])
-        p.resetBasePositionAndOrientation(self._drone_id, pos, ori)
 
         # Hélices
         self._prop_angle += 20.0
@@ -684,12 +582,14 @@ class AgriDroneEnv(BaseEnv):
                 visual = p.createVisualShape(
                     p.GEOM_BOX,
                     halfExtents=[half_x, half_y, 0.025],
-                    rgbaColor=[0.2, 0.8, 0.2, 0.8]  # vert par défaut
+                    rgbaColor=[0.2, 0.8, 0.2, 0.8],  # vert par défaut
+                    physicsClientId=self._client
                 )
                 body_id = p.createMultiBody(
                     baseMass=0,
                     baseVisualShapeIndex=visual,
-                    basePosition=[x, y, z]
+                    basePosition=[x, y, z],
+                    physicsClientId=self._client
                 )
                 row.append(body_id)
             self._cell_ids.append(row)

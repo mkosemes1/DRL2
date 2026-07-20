@@ -16,7 +16,6 @@ Ajoute tqdm (barre de progression) et wandb (logging des métriques).
 """
 
 import os
-import torch
 import wandb
 from agent.model import Agent
 from environment.env import AgriDroneEnv
@@ -48,7 +47,7 @@ config = {
         "attitude_time_constant": 0.08,
         "urdf_path": os.path.join("environment", "agri_hexacopter_pro.urdf"),
     },
-    "simulation": {"dt": 0.02, "max_episode_steps": 1000},
+    "simulation": {"dt": 0.02, "max_episode_steps": 5000},
     "normalization": {"max_velocity": 50.0, "max_distance": 100.0},
     "water_task": {
         "basin_position": [15.0, 15.0, 0.5],
@@ -60,7 +59,7 @@ config = {
 }
 
 
-train_config = TrainConfig(device="cpu", model_name="agriDrone", model_saved_path="./checkpoints")
+train_config = TrainConfig(device="cpu", model_name="agriDrone", model_saved_path="./checkpoints", timestamp=500_000)
 ppo_config = PPOConfig()
 env = AgriDroneEnv(config)
 obs_dim = env.observation_space.shape
@@ -70,7 +69,7 @@ agent = Agent(obs_dim[0], act_dim[0])
 ppo_trainer = PPOTrainer(agent, ppo_config)
 trainer = BaseTrain(agent, env, buffer, train_config, ppo_trainer)
 
-torch.set_default_device(train_config.device)
+wandb.login()
 
 log_config = {
         'epochs': train_config.num_update,
@@ -87,10 +86,10 @@ with wandb.init(project="drone", config=log_config) as run:
         state, _ = env.reset()
         trainer.rollout_phase(state)
         loss, policy_loss, value_loss, entropy_loss = trainer.update_weights(step)
-        trainer.save_model()
         run.log({'Loss': loss,
                  'policy loss': policy_loss,
                  'value loss': value_loss,
                  'entropy loss': entropy_loss,
                  'reward': trainer.cumulative_reward})
     env.close()
+    trainer.save_model()
