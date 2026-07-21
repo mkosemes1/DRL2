@@ -263,6 +263,7 @@ class AgriDroneEnv(BaseEnv):
         # --- Gestion du remplissage du réservoir à la bassine ---
         just_refilled = False
         drone_pos = self._get_drone_pos()
+        crashed = bool(drone_pos[2] < 0.15)
         dist_to_basin = np.linalg.norm(drone_pos - self.water_basin_position)
         if dist_to_basin < self.basin_refill_radius:
             if self.water_tank_level < 98.0:
@@ -287,9 +288,10 @@ class AgriDroneEnv(BaseEnv):
             just_refilled=just_refilled,
             all_watered=all_watered,
             num_unwatered=int(np.sum(self.plant_groups[:, 3] < 0.5)),
+            crashed = crashed
         )
 
-        terminated = all_watered
+        terminated = all_watered or crashed
         truncated = (self.step_count >= self.max_steps)
 
         obs = self._get_obs()

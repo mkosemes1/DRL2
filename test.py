@@ -47,7 +47,7 @@ config = {
 
 def test_agent(checkpoint_path="./checkpoints/agriDrone.pth", num_episodes=5):
     # 1. Initialiser l'environnement avec le rendu visuel
-    env = AgriDroneEnv(config)
+    env = AgriDroneEnv(config, render_mode="human")
     
     # 2. Initialiser l'agent avec les bonnes dimensions
     obs_dim = env.observation_space.shape
@@ -87,7 +87,7 @@ def test_agent(checkpoint_path="./checkpoints/agriDrone.pth", num_episodes=5):
             total_reward += reward
             state = next_state
             step += 1
-            print(total_reward)
+            #print(total_reward)
             
             done = terminated or truncated
             
@@ -106,7 +106,7 @@ def test_agent(checkpoint_path="./checkpoints/agriDrone.pth", num_episodes=5):
             # Ralentir un tout petit peu la boucle pour que l'œil humain puisse suivre
             time.sleep(0.02)
             
-        print(f"🏁 Épisode {ep+1} terminé en {step} pas. Récompense totale: {total_reward:.2f}")
+        print(f"Épisode {ep+1} terminé en {step} pas. Récompense totale: {total_reward:.2f}")
 
     env.close()
 

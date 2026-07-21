@@ -287,6 +287,7 @@ class RewardCalculator:
         just_refilled: bool,
         all_watered: bool,
         num_unwatered: int,
+        crashed: bool
     ) -> tuple[float, dict]:
         """Calcule la récompense pour la tâche d'irrigation avec gestion de réservoir.
 
@@ -326,14 +327,15 @@ class RewardCalculator:
         # Pénalité temporelle proportionnelle au nombre de groupes non arrosés
         terms["time_penalty"] = -c.time_penalty
 
-        # Shaping de distance : récompense pour se rapprocher du groupe le plus proche
-        terms["distance_shaping"] = c.distance_shaping_reward * (prev_dist - curr_dist)
         if num_unwatered > 0 and prev_dist < float("inf") and curr_dist < float("inf"):
-            if curr_dist < prev_dist:
-                terms["distance_shaping"] = c.distance_shaping_reward
+            terms["distance_shaping"] = c.distance_shaping_reward * (prev_dist - curr_dist)
+        else:
+            terms["distance_shaping"] = 0.0
 
         # Bonus de mission accomplie
         terms["mission_complete"] = c.mission_complete_reward if all_watered else 0.0
+
+        terms["collision"] = -c.collision_penalty if crashed else 0.0
 
         total_reward = sum(terms.values())
         return float(total_reward), terms
