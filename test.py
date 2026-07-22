@@ -1,6 +1,5 @@
 """
 test.py
-=======
 Script d'évaluation visuelle pour l'agent drone agricole.
 Charge les poids sauvegardés et lance l'environnement en mode 'human'.
 """

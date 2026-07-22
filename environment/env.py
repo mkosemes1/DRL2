@@ -1,6 +1,5 @@
 """
 environment/agri_drone_env.py
-=============================
 Environnement Gymnasium pour drone agricole.
 Version avec vol fonctionnel et affichage de la grille de champs.
 """
@@ -606,6 +605,11 @@ class AgriDroneEnv(BaseEnv):
             - Bleu : pulvérisée ou arrosée
             - Vert : saine et humide (par défaut)
         """
+
+        # Si on n'a pas encore de cache pour les couleurs, on le crée
+        if not hasattr(self, "_last_colors"):
+            self._last_colors = {}
+
         for i, row in enumerate(self.field_grid):
             for j, cell in enumerate(row):
                 if i >= len(self._cell_ids) or j >= len(self._cell_ids[i]):
@@ -621,7 +625,11 @@ class AgriDroneEnv(BaseEnv):
                     color = [0.1, 0.5, 0.9, 0.8]   # bleu
                 else:
                     color = [0.2, 0.8, 0.2, 0.8]   # vert
-                p.changeVisualShape(body_id, -1, rgbaColor=color)
+
+                # OPTIMISATION : On ne communique avec PyBullet QUE si la couleur a changé
+                if self._last_colors.get(body_id) != color:
+                    p.changeVisualShape(body_id, -1, rgbaColor=list(color))
+                    self._last_colors[body_id] = color
 
     def close(self):
         """Ferme les connexions PyBullet et libère les ressources.

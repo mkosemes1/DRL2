@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 minimal_fly_env.py
-==================
 Environnement Gymnasium ultra-minimal qui utilise le modèle physique
 de DroneDynamics et le rendu PyBullet.
 AUCUNE logique agricole, AUCUNE limitation (batterie, collisions, etc.).

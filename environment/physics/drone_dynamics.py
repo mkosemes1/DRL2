@@ -24,8 +24,9 @@ class DroneWrapper:
         flight_action: [throttle, roll, pitch, yaw] entre -1 et 1
         """
         # Exemple de dynamique simple pour l'action spatiale :
-        normalized_throttle = (flight_action[0] + 1.0) / 2.0  # Devient entre 0 et 1
-        thrust = normalized_throttle * 350.0                  # Devient entre 0 et 350 N
+        #normalized_throttle = (flight_action[0] + 1.0) / 2.0  # Devient entre 0 et 1
+        thrust = 147.15 + flight_action[0] * 200.0
+        thrust = np.clip(thrust, 0.0, 350.0)
         roll_cmd = flight_action[1] * 10.0
         pitch_cmd = flight_action[2] * 10.0
         yaw_cmd = flight_action[3] * 5.0
