@@ -44,7 +44,7 @@ config = {
     },
 }
 
-def test_agent(checkpoint_path="./checkpoints/agriDrone.pth", num_episodes=5):
+def test_agent(checkpoint_path="./checkpoints/agriDrone.pt", num_episodes=5):
     # 1. Initialiser l'environnement avec le rendu visuel
     env = AgriDroneEnv(config, render_mode="human")
     
@@ -68,7 +68,7 @@ def test_agent(checkpoint_path="./checkpoints/agriDrone.pth", num_episodes=5):
         done = False
         total_reward = 0.0
         step = 0
-        while not done:
+        while True:
             # Convertir l'état en tenseur pour PyTorch
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             
@@ -88,7 +88,7 @@ def test_agent(checkpoint_path="./checkpoints/agriDrone.pth", num_episodes=5):
             step += 1
             #print(total_reward)
             
-            done = terminated or truncated
+            #done = terminated or truncated
             
             # Imprimer quelques infos utiles de temps en temps
             if step % 50 == 0:
@@ -104,6 +104,10 @@ def test_agent(checkpoint_path="./checkpoints/agriDrone.pth", num_episodes=5):
 
             # Ralentir un tout petit peu la boucle pour que l'œil humain puisse suivre
             time.sleep(0.02)
+
+            if terminated or truncated:
+                print(f"Fin d'épisode ! Crash: {info.get('crashed')}. Reset de l'environnement.")
+                next_state, info = env.reset()
             
         print(f"Épisode {ep+1} terminé en {step} pas. Récompense totale: {total_reward:.2f}")
 
