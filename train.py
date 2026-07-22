@@ -17,6 +17,7 @@ Ajoute tqdm (barre de progression) et wandb (logging des métriques).
 
 import os
 import wandb
+import gymnasium as gym
 from agent.model import Agent
 from environment.env import AgriDroneEnv
 from tqdm import tqdm
@@ -62,6 +63,7 @@ config = {
 train_config = TrainConfig(device="cuda:0", model_name="agriDrone", model_saved_path="./checkpoints", timestamp=10_000_000)
 ppo_config = PPOConfig(clip_eps=0.2, ent_coef=0.001)
 env = AgriDroneEnv(config)
+env = gym.wrappers.Autoreset(env)
 obs_dim = env.observation_space.shape
 act_dim = env.action_space.shape
 buffer = Buffer(step=train_config.rollout_steps, state_shape=obs_dim, action_shape=act_dim)

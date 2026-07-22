@@ -131,8 +131,10 @@ class AgriDroneEnv(BaseEnv):
             physicsClientId=self._client
         )
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
+        # On passe le seed et les options au parent si géré par BaseEnv / Gymnasium
         super().reset(seed=seed)
+        
         self.step_count = 0
         self.battery_level = 1e6
         self.water_tank_level = 100.0
@@ -142,7 +144,7 @@ class AgriDroneEnv(BaseEnv):
         start_ori = p.getQuaternionFromEuler([0, 0, 0])
         self.dynamics.reset(base_position=start_pos)
 
-        # Initialisation de la grille
+        # Reste de ta logique de reset...
         if self.field_grid is None:
             self.field_grid = [[FieldCell() for _ in range(self.field_size[1])] for _ in range(self.field_size[0])]
         
@@ -155,7 +157,6 @@ class AgriDroneEnv(BaseEnv):
                 cell.sprayed = False
                 cell.watered = False
 
-        # Groupes de plantes
         x_min, x_max = self.world_bounds["x"]
         y_min, y_max = self.world_bounds["y"]
         z_min, z_max = self.world_bounds["z"]
