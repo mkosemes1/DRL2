@@ -234,6 +234,9 @@ class AgriDroneEnv(BaseEnv):
 
         pos, lin_vel, ang_vel, (roll, pitch, yaw) = self.dynamics.get_raw_state()
 
+        is_flipped = abs(roll) > 1.4 or abs(pitch) > 1.4
+        crashed = bool(pos[2] < 0.15) or is_flipped
+
         # Calcul de la récompense via le RewardCalculator
         reward, reward_terms = self.reward_calc.compute_water_task(
             tank_level=self.water_tank_level,
