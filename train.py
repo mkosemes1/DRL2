@@ -59,7 +59,7 @@ config = {
 }
 
 
-train_config = TrainConfig(device="cuda:0", model_name="agriDrone", model_saved_path="./checkpoints", timestamp=10_000_000)
+train_config = TrainConfig(device="cuda:0", model_name="agriDrone", model_saved_path="./checkpoints", timestamp=1_000_000)
 ppo_config = PPOConfig(clip_eps=0.2, ent_coef=0.001)
 env = AgriDroneEnv(config)
 obs_dim = env.observation_space.shape
