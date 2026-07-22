@@ -185,7 +185,7 @@ class AgriDroneEnv(BaseEnv):
         # 1. Action physique du drone
         self.dynamics.apply_action(flight_action)
 
-        # 2. Application du vent physique
+        # 2. Application du vent physique (désactivé par défaut pour l'apprentissage)
         current_wind = self.wind.step()
         if self.wind.enabled:
             wind_force = [current_wind[0], current_wind[1], 0.0]
@@ -196,7 +196,14 @@ class AgriDroneEnv(BaseEnv):
 
         p.stepSimulation(physicsClientId=self._client)
 
-        # 3. Maintien et états du sol
+        # Récupération de l'état physique actuel
+        pos, lin_vel, ang_vel, (roll, pitch, yaw) = self.dynamics.get_raw_state()
+        drone_pos = np.array(pos, dtype=np.float32)
+
+        # --- ANTI-TRICHE : Détection du retournement (drone sur le dos) ---
+        is_flipped = abs(roll) > 1.4 or abs(pitch) > 1.4
+
+        # Maintien et états du sol
         cell = self._get_cell_under_drone()
         if cell is not None:
             cell.visited = True
@@ -218,7 +225,6 @@ class AgriDroneEnv(BaseEnv):
 
         # Remplissage à la bassine
         just_refilled = False
-        drone_pos = self._get_drone_pos()
         dist_to_basin = np.linalg.norm(drone_pos - self.water_basin_position)
         if dist_to_basin < self.basin_refill_radius:
             if self.water_tank_level < 98.0:
@@ -230,14 +236,11 @@ class AgriDroneEnv(BaseEnv):
 
         curr_dist = self._distance_to_nearest_unwatered()
         all_watered = bool(np.all(self.plant_groups[:, 3] >= 0.5))
-        crashed = bool(drone_pos[2] < 0.15)
+        
+        # Le drone crash s'il touche le sol OU s'il est retourné sur le dos
+        crashed = bool(drone_pos[2] < 0.15) or is_flipped
 
-        pos, lin_vel, ang_vel, (roll, pitch, yaw) = self.dynamics.get_raw_state()
-
-        is_flipped = abs(roll) > 1.4 or abs(pitch) > 1.4
-        crashed = bool(pos[2] < 0.15) or is_flipped
-
-        # Calcul de la récompense via le RewardCalculator
+        # Calcul de la récompense
         reward, reward_terms = self.reward_calc.compute_water_task(
             tank_level=self.water_tank_level,
             prev_dist=prev_dist,

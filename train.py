@@ -47,7 +47,7 @@ config = {
         "attitude_time_constant": 0.08,
         "urdf_path": os.path.join("environment", "agri_hexacopter_pro.urdf"),
     },
-    "simulation": {"dt": 0.02, "max_episode_steps": 5000},
+    "simulation": {"dt": 0.02, "max_episode_steps": 2000},
     "normalization": {"max_velocity": 50.0, "max_distance": 100.0},
     "water_task": {
         "basin_position": [15.0, 15.0, 0.5],
@@ -85,11 +85,12 @@ with wandb.init(project="drone", config=log_config) as run:
     state, _ = env.reset()
     for step in tqdm(range(train_config.num_update)):
         trainer.rollout_phase(state)
+        epoch_reward = sum(trainer.buffer.rewards)
         loss, policy_loss, value_loss, entropy_loss = trainer.update_weights(step)
         run.log({'Loss': loss,
                  'policy loss': policy_loss,
                  'value loss': value_loss,
                  'entropy loss': entropy_loss,
-                 'reward': trainer.cumulative_reward})
+                 'reward': epoch_reward})
     env.close()
     trainer.save_model()
